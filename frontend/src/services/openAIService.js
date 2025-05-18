@@ -1,9 +1,10 @@
-// frontend/src/services/openAIService.js
+// frontend/src/services/openAIService.js - Fix for post method error
+
 /**
  * Client-side service for OpenAI-related functionality
  * This makes API calls to your backend, which then uses OpenAI
  */
-import apiService from './apiService';
+import axios from 'axios'; // Direct import axios instead of relying on apiService
 
 /**
  * Generate a roof estimate based on form data
@@ -12,27 +13,11 @@ import apiService from './apiService';
  */
 export const generateEstimate = async (formData) => {
   try {
-    // Call our backend API, not OpenAI directly
-    const response = await apiService.generateRoofEstimate(formData);
+    // Call your existing endpoint
+    const response = await axios.post('/api/estimate', formData);
     return response.data;
   } catch (error) {
     console.error('Error generating estimate:', error);
-    throw error;
-  }
-};
-
-/**
- * Get a completion or answer to a specific roofing question
- * @param {string} question - The question to ask
- * @returns {Promise} - Resolves with answer data
- */
-export const askRoofingQuestion = async (question) => {
-  try {
-    // This would call a backend endpoint that uses OpenAI
-    const response = await apiService.post('/api/ask', { question });
-    return response.data;
-  } catch (error) {
-    console.error('Error asking question:', error);
     throw error;
   }
 };
@@ -44,8 +29,8 @@ export const askRoofingQuestion = async (question) => {
  */
 export const analyzeRoofImage = async (imageBase64) => {
   try {
-    // Send the image to our backend to process with OpenAI Vision
-    const response = await apiService.post('/api/analyze-roof', {
+    // Direct axios call instead of using apiService
+    const response = await axios.post('/api/analyze-roof', {
       image: imageBase64
     });
     
@@ -53,6 +38,24 @@ export const analyzeRoofImage = async (imageBase64) => {
     return response.data.coordinates;
   } catch (error) {
     console.error('Error analyzing roof image:', error);
+    // Return null instead of throwing to avoid breaking the application
+    // This will trigger the fallback method
+    return null;
+  }
+};
+
+/**
+ * Get a completion or answer to a specific roofing question
+ * @param {string} question - The question to ask
+ * @returns {Promise} - Resolves with answer data
+ */
+export const askRoofingQuestion = async (question) => {
+  try {
+    // Direct axios call
+    const response = await axios.post('/api/ask', { question });
+    return response.data;
+  } catch (error) {
+    console.error('Error asking question:', error);
     throw error;
   }
 };
