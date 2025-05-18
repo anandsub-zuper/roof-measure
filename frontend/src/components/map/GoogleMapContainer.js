@@ -15,6 +15,7 @@ const GoogleMapContainer = forwardRef(({
   const [polygonInstance, setPolygonInstance] = useState(null);
   const [markerInstance, setMarkerInstance] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [loadingTimeout, setLoadingTimeout] = useState(null);
   
   console.log("GoogleMapContainer rendering with props:", { lat, lng, address });
   
@@ -37,6 +38,16 @@ const GoogleMapContainer = forwardRef(({
   
   // Initialize map when component mounts
   useEffect(() => {
+    // Create a timeout to handle potential freezes
+    const timeoutId = setTimeout(() => {
+      const errorMsg = "Map initialization timed out after 15 seconds";
+      console.error(errorMsg);
+      setErrorMessage(errorMsg);
+      onMapError && onMapError(errorMsg);
+    }, 15000);
+    
+    setLoadingTimeout(timeoutId);
+    
     try {
       // Ensure we have valid coordinates
       const validLat = parseFloat(lat);
@@ -47,7 +58,8 @@ const GoogleMapContainer = forwardRef(({
         console.error(errorMsg);
         setErrorMessage(errorMsg);
         onMapError && onMapError(errorMsg);
-        return () => {}; // Return empty cleanup function
+        clearTimeout(timeoutId);
+        return () => {};
       }
 
       if (!mapContainerRef.current) {
@@ -55,6 +67,7 @@ const GoogleMapContainer = forwardRef(({
         console.error(errorMsg);
         setErrorMessage(errorMsg);
         onMapError && onMapError(errorMsg);
+        clearTimeout(timeoutId);
         return () => {};
       }
       
@@ -72,9 +85,12 @@ const GoogleMapContainer = forwardRef(({
           const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
           
           if (!API_KEY) {
-            reject(new Error("Google Maps API key is missing"));
+            console.error("Google Maps API key is missing in environment variables");
+            reject(new Error("Google Maps API key is missing. Check your environment variables."));
             return;
           }
+          
+          console.log("Google Maps API Key:", API_KEY ? "Present (first 4 chars: " + API_KEY.substring(0,4) + "...)" : "MISSING");
           
           // Create callback function
           window.initGoogleMapsCallback = () => {
@@ -91,11 +107,18 @@ const GoogleMapContainer = forwardRef(({
           
           script.onerror = (error) => {
             console.error("Error loading Google Maps API:", error);
-            reject(error);
+            reject(new Error("Failed to load Google Maps API. Check your internet connection and API key."));
           };
           
           // Add script to document
           document.head.appendChild(script);
+          
+          // Add extra timeout just for the script loading
+          setTimeout(() => {
+            if (!window.google || !window.google.maps) {
+              reject(new Error("Google Maps API loading timed out"));
+            }
+          }, 10000);
         });
       };
       
@@ -104,6 +127,9 @@ const GoogleMapContainer = forwardRef(({
         try {
           // Load Google Maps API
           await loadGoogleMapsApi();
+          
+          // Clear the timeout since API loaded successfully
+          clearTimeout(timeoutId);
           
           console.log("Creating map with coordinates:", validLat, validLng);
           
@@ -150,15 +176,34 @@ const GoogleMapContainer = forwardRef(({
           setPolygonInstance(polygon);
           
           // Calculate area (simple formula for demonstration)
-          const area = 2500; // Default area estimate
+          const calculateArea = () => {
+            if (window.google && window.google.maps && window.google.maps.geometry) {
+              // Use Google's geometry library to calculate area
+              const path = polygon.getPath();
+              const googleLatLngs = [];
+              for (let i = 0; i < path.getLength(); i++) {
+                googleLatLngs.push(path.getAt(i));
+              }
+              
+              // Calculate area in square meters
+              const areaInSqMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
+              // Convert to square feet (1 sq meter = 10.7639 sq feet)
+              return Math.round(areaInSqMeters * 10.7639);
+            }
+            return 2500; // Default fallback
+          };
+          
+          const area = calculateArea();
+          console.log("Calculated area:", area, "sq ft");
           
           // Notify parent components
           onMapReady && onMapReady(map);
           onPolygonCreated && onPolygonCreated(polygon, area);
         } catch (error) {
           console.error("Error initializing map:", error);
-          setErrorMessage(error.message);
-          onMapError && onMapError(error.message);
+          setErrorMessage(error.message || "Failed to initialize Google Maps");
+          onMapError && onMapError(error.message || "Failed to initialize Google Maps");
+          clearTimeout(timeoutId);
         }
       };
       
@@ -167,6 +212,7 @@ const GoogleMapContainer = forwardRef(({
       
       // Cleanup function
       return () => {
+        clearTimeout(timeoutId);
         if (polygonInstance) polygonInstance.setMap(null);
         if (markerInstance) markerInstance.setMap(null);
         if (mapInstance && window.google?.maps?.event) {
@@ -175,11 +221,21 @@ const GoogleMapContainer = forwardRef(({
       };
     } catch (error) {
       console.error("Critical error in map component:", error);
-      setErrorMessage(error.message);
-      onMapError && onMapError(error.message);
+      setErrorMessage(error.message || "Unknown map error");
+      onMapError && onMapError(error.message || "Unknown map error");
+      clearTimeout(timeoutId);
       return () => {};
     }
   }, [lat, lng, address, onMapReady, onMapError, onPolygonCreated]);
+
+  // Clean up timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (loadingTimeout) {
+        clearTimeout(loadingTimeout);
+      }
+    };
+  }, [loadingTimeout]);
 
   // Simple error display
   if (errorMessage) {
