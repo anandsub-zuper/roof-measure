@@ -105,35 +105,34 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   }, [formData.roofSize, updateFormData]);
 
   // Handle polygon creation with fallback - optimized with useCallback
-  const handlePolygonCreated = useCallback((polygon, area) => {
-    if (performanceMonitor && performanceMonitor.start) {
-      performanceMonitor.start('polygonAreaCalc');
-    }
+ // Fix for the handlePolygonCreated function in RoofSizeStep.js
+const handlePolygonCreated = useCallback((polygon, area) => {
+  console.log("Polygon created with area:", area);
+  
+  // IMPORTANT CHANGE: Only update the roof size if roofSizeAuto is true,
+  // AND if there's a significant difference from the backend value (>15%)
+  if (formData.roofSizeAuto) {
+    // Check if the calculated area is significantly different from the API value
+    const initialSize = formData.initialRoofSize || formData.roofSize;
     
-    console.log("Polygon created with area:", area);
-    
-    if (formData.roofSizeAuto) {
-      const initialSize = formData.initialRoofSize || formData.roofSize;
+    if (initialSize) {
       const percentDiff = Math.abs(area - initialSize) / initialSize;
-      const areaValue = area || formData.roofSize || 2500;
-      console.log("Updating roof size to:", areaValue);
-      setLocalRoofSize(areaValue);
-      debouncedUpdateRoofSize(areaValue);
-    }
-    
-    if (performanceMonitor && performanceMonitor.end) {
-      performanceMonitor.end('polygonAreaCalc');
-    }
-    if (percentDiff > 0.15) {
-      console.log("Polygon area differs significantly from API value, keeping API value");
-      // Preserve the backend measurement as it's likely more accurate
+      
+      if (percentDiff > 0.15) {
+        console.log("Polygon area differs significantly from API value, keeping API value");
+        // Preserve the backend measurement as it's likely more accurate
+      } else {
+        // The measurements are close enough, so we can use the polygon area
+        console.log("Updating roof size to match polygon area:", area);
+        updateFormData('roofSize', area);
+      }
     } else {
-      // The measurements are close enough, so we can use the polygon area
-      console.log("Updating roof size to match polygon area:", area);
+      // No initial size, just use the calculated area
+      console.log("Updating roof size to:", area);
       updateFormData('roofSize', area);
     }
   }
-  }, [formData.roofSize, formData.roofSizeAuto, debouncedUpdateRoofSize]);
+}, [formData.roofSizeAuto, formData.initialRoofSize, formData.roofSize, updateFormData]);
 
   // Toggle automatic/manual size - optimized with useCallback
   const handleToggleAutoSize = useCallback((e) => {
