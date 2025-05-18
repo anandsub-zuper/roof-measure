@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
+import killSwitch from '../killSwitch';
 
 // Import step components
 import AddressStep from './steps/AddressStep';
@@ -72,12 +73,19 @@ const EstimateForm = () => {
   // Special handling for address step - get coordinates and roof size
   const getAddressDetails = useCallback(async () => {
   if (!formData.address) return;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Operation timed out')), 10000);
+  });
   
   setIsLoading(true);
   try {
     // Get coordinates from address
     console.log("Getting coordinates for address:", formData.address);
-    const response = await apiService.getAddressCoordinates(formData.address);
+    const response = await Promise.race([
+      apiService.getAddressCoordinates(formData.address),
+      timeoutPromise
+       ]);
     console.log("Geocoding API response:", response);
     
     // Fixed: Check response structure and adapt to different possible formats
