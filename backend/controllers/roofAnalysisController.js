@@ -5,6 +5,8 @@ const { logInfo, logError } = require('../utils/logger');
 
 /**
  * Analyze roof using OpenAI Vision and property data
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
  */
 exports.analyzeRoof = async (req, res) => {
   try {
@@ -97,16 +99,3 @@ exports.analyzeRoof = async (req, res) => {
     );
   }
 };
-
-// backend/routes/roofAnalysisRoutes.js
-const express = require('express');
-const router = express.Router();
-const roofAnalysisController = require('../controllers/roofAnalysisController');
-
-router.post('/analyze', roofAnalysisController.analyzeRoof);
-
-module.exports = router;
-
-// Add to your main routes file
-// In server.js or app.js
-app.use('/api/roof', require('./routes/roofAnalysisRoutes'));
