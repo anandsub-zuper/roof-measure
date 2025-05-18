@@ -46,6 +46,7 @@ const geocodeAddress = async (address) => {
     });
     
     return {
+      success: true,  // Explicitly include success property
       lat,
       lng,
       formattedAddress: result.formatted_address,
@@ -113,7 +114,8 @@ const estimateRoofSize = async (lat, lng) => {
     size = Math.max(1500, Math.min(5000, size));
     
     return {
-      size,
+      success: true, // Explicitly include success property
+      size: size,    // Make sure 'size' property exists
       accuracy: "high",
       method: "satellite",
       roofPolygon: generateSimulatedRoofPolygon(lat, lng, size)
@@ -123,7 +125,8 @@ const estimateRoofSize = async (lat, lng) => {
     
     // Return a default size on error
     return {
-      size: 3000,
+      success: false, // Explicitly include success=false
+      size: 3000,     // Always provide a default size
       accuracy: "low",
       method: "fallback"
     };
