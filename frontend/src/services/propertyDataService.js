@@ -1,4 +1,5 @@
-// src/services/propertyDataService.js
+// Enhanced propertyDataService.js with improved debugging
+// Replace or modify your frontend/src/services/propertyDataService.js
 
 import axios from 'axios';
 
@@ -7,6 +8,9 @@ const RENTCAST_API_KEY = process.env.REACT_APP_RENTCAST_API_KEY || '';
 
 // In-memory cache to avoid redundant API calls
 const propertyDataCache = {};
+
+// Debug flag - set to true to enable detailed logging
+const DEBUG = true; 
 
 /**
  * Get property details from Rentcast API
@@ -19,22 +23,40 @@ export const getPropertyDetails = async (address) => {
     return null;
   }
   
+  // Log the start of the property lookup
+  if (DEBUG) {
+    console.log('🏠 RENTCAST: Starting property lookup for:', address);
+  }
+  
   // Check in-memory cache first
   const cacheKey = address.trim().toLowerCase();
   if (propertyDataCache[cacheKey]) {
-    console.log('Using cached property data for:', address);
+    if (DEBUG) {
+      console.log('🏠 RENTCAST: Using cached property data for:', address);
+    }
     return propertyDataCache[cacheKey];
   }
 
   // Skip API call if no key is configured
   if (!RENTCAST_API_KEY) {
-    console.warn('No Rentcast API key configured, using fallback property detection');
+    console.warn('🏠 RENTCAST: No API key configured, using fallback property detection');
     const fallbackData = getFallbackPropertyData(address);
     propertyDataCache[cacheKey] = fallbackData;
+    
+    if (DEBUG) {
+      console.log('🏠 RENTCAST: Generated fallback data:', fallbackData);
+    }
+    
     return fallbackData;
   }
   
   try {
+    // Log the API request
+    if (DEBUG) {
+      console.log('🏠 RENTCAST: Making API request to Rentcast for:', address);
+      console.log('🏠 RENTCAST: API Key present:', !!RENTCAST_API_KEY);
+    }
+    
     // Make request to Rentcast API
     const response = await axios.get('https://api.rentcast.io/v1/properties', {
       params: {
@@ -46,24 +68,49 @@ export const getPropertyDetails = async (address) => {
       }
     });
     
+    // Log the API response status
+    if (DEBUG) {
+      console.log('🏠 RENTCAST: Received response with status:', response.status);
+    }
+    
     // Process the response
     if (response.data && response.status === 200) {
+      // Log the raw API response
+      if (DEBUG) {
+        console.log('🏠 RENTCAST: Raw API response:', response.data);
+      }
+      
       const propertyData = processPropertyData(response.data);
       
       // Cache the results in memory
       propertyDataCache[cacheKey] = propertyData;
       
-      console.log('Retrieved property data for:', address, propertyData);
+      if (DEBUG) {
+        console.log('🏠 RENTCAST: Processed property data:', propertyData);
+      }
+      
       return propertyData;
     }
     
     // Use fallback if API returns empty result
-    console.warn('Rentcast API returned empty result, using fallback detection');
+    console.warn('🏠 RENTCAST: API returned empty result, using fallback detection');
     const fallbackData = getFallbackPropertyData(address);
     propertyDataCache[cacheKey] = fallbackData;
     return fallbackData;
   } catch (error) {
-    console.error('Error fetching property data:', error);
+    console.error('🏠 RENTCAST: Error fetching property data:', error);
+    
+    // Log detailed error information
+    if (DEBUG) {
+      if (error.response) {
+        console.error('🏠 RENTCAST: Error response data:', error.response.data);
+        console.error('🏠 RENTCAST: Error response status:', error.response.status);
+      } else if (error.request) {
+        console.error('🏠 RENTCAST: No response received, request was:', error.request);
+      } else {
+        console.error('🏠 RENTCAST: Error message:', error.message);
+      }
+    }
     
     // Fallback to local estimations if API fails
     const fallbackData = getFallbackPropertyData(address);
@@ -80,7 +127,7 @@ export const getPropertyDetails = async (address) => {
 const processPropertyData = (rawData) => {
   // Extract the relevant information from the API response
   // NOTE: Adjust field names based on actual Rentcast API response structure
-  return {
+  const processedData = {
     propertyType: rawData.propertyType || rawData.type || 'unknown',
     buildingSize: rawData.buildingSize || rawData.squareFootage || null,
     lotSize: rawData.lotSize || null,
@@ -97,6 +144,22 @@ const processPropertyData = (rawData) => {
     parcelId: rawData.parcelId || null,
     source: 'rentcast'
   };
+  
+  // Log what fields were found vs not found
+  if (DEBUG) {
+    const foundFields = Object.entries(processedData)
+      .filter(([key, value]) => value !== null)
+      .map(([key]) => key);
+      
+    const missingFields = Object.entries(processedData)
+      .filter(([key, value]) => value === null)
+      .map(([key]) => key);
+    
+    console.log('🏠 RENTCAST: Fields found in API response:', foundFields.join(', '));
+    console.log('🏠 RENTCAST: Fields missing in API response:', missingFields.join(', '));
+  }
+  
+  return processedData;
 };
 
 /**
@@ -192,11 +255,20 @@ export const clearPropertyDataCache = () => {
   Object.keys(propertyDataCache).forEach(key => {
     delete propertyDataCache[key];
   });
-  console.log('Property data cache cleared');
+  console.log('🏠 RENTCAST: Property data cache cleared');
+};
+
+/**
+ * Check if Rentcast API is configured and available
+ * @returns {boolean} - True if API is available
+ */
+export const isRentcastAvailable = () => {
+  return !!RENTCAST_API_KEY;
 };
 
 export default {
   getPropertyDetails,
   getBuildingCategory,
-  clearPropertyDataCache
+  clearPropertyDataCache,
+  isRentcastAvailable
 };
