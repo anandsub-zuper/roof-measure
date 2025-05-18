@@ -50,6 +50,7 @@ const GoogleMapContainer = forwardRef(({
   }));
   
   // Function to create accurate polygon based on roof size or provided coords
+  // FIXED: Removed all randomness for consistent polygons
   const createRoofPolygon = (validLat, validLng, size, providedPolygon = null) => {
     // If we have polygon coordinates from the backend, use them
     if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
@@ -57,12 +58,11 @@ const GoogleMapContainer = forwardRef(({
       return providedPolygon;
     }
     
-    // Otherwise, create a better estimate using the house footprint approach
+    // Otherwise, create a deterministic estimate
     console.log("Creating estimated roof polygon");
     const roofSizeSqFt = size || 2500;
     
-    // Calculate aspect ratio based on typical house layouts
-    // Most homes have aspect ratios between 1:1 and 1:2
+    // Use fixed aspect ratio for consistency
     const aspectRatio = 1.5;
     
     // Calculate dimensions based on roof size and aspect ratio
@@ -70,7 +70,7 @@ const GoogleMapContainer = forwardRef(({
     const width = Math.sqrt(area / aspectRatio);
     const length = width * aspectRatio;
     
-    // Convert to degrees
+    // Convert to degrees - use fixed conversion factors
     const feetPerDegreeLat = 364000;
     const latRadians = validLat * (Math.PI / 180);
     const feetPerDegreeLng = feetPerDegreeLat * Math.cos(latRadians);
@@ -78,11 +78,10 @@ const GoogleMapContainer = forwardRef(({
     const latOffset = (length / 2) / feetPerDegreeLat;
     const lngOffset = (width / 2) / feetPerDegreeLng;
     
-    // Adjust the polygon to be better aligned with typical property layout
-    // Moving it slightly back from the road (most address markers are near the street)
-    const adjustedLat = validLat + (latOffset * 0.3); // Slight adjustment toward back of property
+    // Fixed adjustment factor - no randomness
+    const adjustedLat = validLat + (latOffset * 0.3);
     
-    // Create polygon using adjusted center point
+    // Create perfectly rectangular polygon - no randomness
     return [
       { lat: adjustedLat - latOffset, lng: validLng - lngOffset },
       { lat: adjustedLat - latOffset, lng: validLng + lngOffset },
@@ -278,9 +277,7 @@ const GoogleMapContainer = forwardRef(({
           setPolygonInstance(polygon);
           
           // Calculate area from the polygon
-          // But IMPORTANT: We'll respect the provided roofSize rather than overwriting it
-          // This preserves the backend's more accurate measurement
-          const area = roofSize || calculatePolygonArea(polygonCoords);
+          const area = calculatePolygonArea(polygonCoords);
           
           // Fit map bounds to show the polygon
           const bounds = new window.google.maps.LatLngBounds();
