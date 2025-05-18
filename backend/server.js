@@ -49,6 +49,8 @@ app.use(morgan('dev')); // Request logging
 const estimateRoutes = require('./routes/estimateRoutes');
 const googleMapsRoutes = require('./routes/googleMapsRoutes');
 const apiRoutes = require('./routes/api');
+const metricsRoutes = require('./routes/metricsRoutes');
+const roofAnalysisRoutes = require('./routes/roofAnalysisRoutes');
 
 // Add request timestamp
 app.use((req, res, next) => {
@@ -60,24 +62,43 @@ app.use((req, res, next) => {
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/maps', googleMapsRoutes);
 app.use('/api', apiRoutes);
+app.use('/api/metrics', metricsRoutes);
+app.use('/api/roof', roofAnalysisRoutes);
 
-try {
-  const metricsRoutes = require('./routes/metricsRoutes');
-  app.use('/api/metrics', metricsRoutes);
-  console.log('Metrics routes loaded successfully');
-} catch (error) {
-  console.error('Failed to load metrics routes:', error.message);
-  // Continue without crashing
-}
-
-try {
-  const roofAnalysisRoutes = require('./routes/roofAnalysisRoutes');
-  app.use('/api/roof', roofAnalysisRoutes);
-  console.log('Roof analysis routes loaded successfully');
-} catch (error) {
-  console.error('Failed to load roof analysis routes:', error.message);
-  // Continue without crashing
-}
+// Diagnostic endpoint for troubleshooting
+app.get('/api/diagnostic', (req, res) => {
+  try {
+    // List all registered routes
+    const routes = [];
+    app._router.stack.forEach(middleware => {
+      if(middleware.route) { // routes registered directly on the app
+        routes.push(middleware.route.path);
+      } else if(middleware.name === 'router') { // router middleware 
+        middleware.handle.stack.forEach(handler => {
+          if(handler.route) {
+            const path = handler.route.path;
+            const method = Object.keys(handler.route.methods)[0].toUpperCase();
+            routes.push(`${method} ${middleware.regexp.toString().replace('/^\\', '').replace('\\/?(?=\\/|$)/i', '')}${path}`);
+          }
+        });
+      }
+    });
+    
+    res.json({
+      status: 'success',
+      message: 'Diagnostic completed successfully',
+      routes: routes,
+      environment: process.env.NODE_ENV || 'development',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'Diagnostic error',
+      error: error.message
+    });
+  }
+});
 
 // Simple health check route
 app.get('/', (req, res) => {
