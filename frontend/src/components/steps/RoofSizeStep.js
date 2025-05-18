@@ -1,6 +1,5 @@
-// src/components/steps/RoofSizeStep.js - Fixed version
-
-import React, { useEffect, useRef } from 'react';
+// src/components/steps/RoofSizeStep.js
+import React, { useEffect, useRef, useState } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
 
@@ -8,64 +7,93 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const roofPolygonRef = useRef(null);
-  
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Convert meters to degrees at the property's latitude
+  const metersToDegrees = (meters, lat) => {
+    const latRad = lat * (Math.PI / 180);
+    const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
+    const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
+    return {
+      lat: meters / latDeg,
+      lng: meters / lngDeg
+    };
+  };
+
+  // Create polygon from coordinates
+  const createPolygon = (coords, map) => {
+    return new window.google.maps.Polygon({
+      paths: coords,
+      strokeColor: '#2563EB',
+      strokeOpacity: 0.9,
+      strokeWeight: 2.5,
+      fillColor: '#2563EB',
+      fillOpacity: 0.4,
+      zIndex: 100
+    });
+  };
+
+  // Fallback to estimated polygon
+  const createEstimatedPolygon = (lat, lng) => {
+    const conversion = metersToDegrees(15, lat);
+    return [
+      { lat: lat - conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }, // SW
+      { lat: lat - conversion.lat * 0.6, lng: lng + conversion.lng * 0.8 }, // SE
+      { lat: lat + conversion.lat * 0.4, lng: lng + conversion.lng * 0.8 }, // NE
+      { lat: lat + conversion.lat * 0.4, lng: lng - conversion.lng * 0.8 }  // NW
+    ];
+  };
+
   // Initialize Google Maps with satellite view
   useEffect(() => {
-    // Function to load Google Maps API script
+    let map;
     const loadGoogleMapsScript = () => {
-      // Check if script is already loaded
       if (window.google && window.google.maps) {
         initMap();
         return;
       }
-      
-      console.log("Loading Google Maps API for satellite view...");
+
       const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
-      
       if (!API_KEY) {
-        console.error("Google Maps API key is missing!");
+        setError("Google Maps API key is missing");
+        setLoading(false);
         return;
       }
-      
-      // Create script element
+
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry`;
       script.async = true;
       script.defer = true;
-      
-      // Handle script load success
-      script.onload = () => {
-        console.log("Google Maps API loaded successfully for map");
-        initMap();
+
+      script.onload = () => initMap();
+      script.onerror = () => {
+        setError("Failed to load Google Maps API");
+        setLoading(false);
       };
-      
-      // Handle script load error
-      script.onerror = (error) => {
-        console.error("Error loading Google Maps API:", error);
-      };
-      
-      // Add script to document
+
       document.head.appendChild(script);
     };
-    
-    // Initialize Map
+
     const initMap = () => {
-      if (!mapContainerRef.current || !window.google || !window.google.maps) {
-        console.error("Map container or Google Maps not available");
+      if (!mapContainerRef.current || !window.google?.maps) {
+        setError("Map container or Google Maps not available");
+        setLoading(false);
         return;
       }
-      
+
       if (!formData.lat || !formData.lng) {
-        console.error("Latitude or longitude is missing", formData);
+        setError("Latitude or longitude is missing");
+        setLoading(false);
         return;
       }
-      
-      console.log("Initializing map with coords:", formData.lat, formData.lng);
-      
+
       try {
-        // Create map centered on the property
-        const mapOptions = {
-          center: { lat: parseFloat(formData.lat), lng: parseFloat(formData.lng) },
+        const lat = parseFloat(formData.lat);
+        const lng = parseFloat(formData.lng);
+
+        map = new window.google.maps.Map(mapContainerRef.current, {
+          center: { lat, lng },
           zoom: 19,
           mapTypeId: 'satellite',
           tilt: 0,
@@ -76,77 +104,59 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           zoomControlOptions: {
             position: window.google.maps.ControlPosition.RIGHT_TOP
           }
-        };
-        
-        const map = new window.google.maps.Map(mapContainerRef.current, mapOptions);
-        mapRef.current = map;
-        
-        // Add a marker for the property
-        new window.google.maps.Marker({
-          position: { lat: parseFloat(formData.lat), lng: parseFloat(formData.lng) },
-          map: map,
-          title: formData.address
         });
-        
-        // Create a simulated roof outline
-        const roofPolygon = createRoofPolygon(parseFloat(formData.lat), parseFloat(formData.lng));
-        roofPolygon.setMap(map);
-        roofPolygonRef.current = roofPolygon;
-        
-        console.log("Map initialized successfully");
-      } catch (error) {
-        console.error("Error initializing map:", error);
+
+        // Enable 3D buildings if available
+        if (map.setOptions) {
+          map.setOptions({ buildings: true });
+        }
+
+        mapRef.current = map;
+
+        // Try to get actual building footprint
+        const service = new window.google.maps.places.PlacesService(map);
+        service.findPlaceFromQuery({
+          query: formData.address,
+          fields: ['geometry']
+        }, (results, status) => {
+          let polygonCoords;
+          
+          if (status === 'OK' && results[0]?.geometry?.viewport) {
+            // Use actual building bounds
+            const bounds = results[0].geometry.viewport;
+            polygonCoords = [
+              bounds.getSouthWest(),
+              { lat: bounds.getSouthWest().lat(), lng: bounds.getNorthEast().lng() },
+              bounds.getNorthEast(),
+              { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
+            ];
+          } else {
+            // Fallback to estimated polygon
+            polygonCoords = createEstimatedPolygon(lat, lng);
+          }
+
+          const polygon = createPolygon(polygonCoords, map);
+          polygon.setMap(map);
+          roofPolygonRef.current = polygon;
+          setLoading(false);
+        });
+
+      } catch (err) {
+        console.error("Error initializing map:", err);
+        setError("Error initializing map");
+        setLoading(false);
       }
     };
-    
-    // Create a polygon to represent the roof outline
-    // Further improved createRoofPolygon function for RoofSizeStep.js
 
-// Create a polygon to represent the roof outline with greater precision
-const createRoofPolygon = (lat, lng) => {
-  console.log("Creating high-precision roof polygon for:", lat, lng);
-  
-  try {
-    // Even smaller offsets for pinpoint precision
-    // These values are carefully tuned for typical residential homes
-    const offsetLatN = 0.000045; // North offset (smaller)
-    const offsetLatS = 0.000055; // South offset (larger to account for garage)
-    const offsetLngE = 0.000085; // East offset
-    const offsetLngW = 0.000085; // West offset
-    
-    // Create a more precise house-shaped polygon with offset adjustments
-    // This more closely matches typical residential roof footprints
-    const polygonCoords = [
-      { lat: lat - offsetLatS, lng: lng - offsetLngW }, // Southwest corner
-      { lat: lat - offsetLatS, lng: lng + offsetLngE }, // Southeast corner
-      { lat: lat + offsetLatN, lng: lng + offsetLngE }, // Northeast corner
-      { lat: lat + offsetLatN, lng: lng - offsetLngW }  // Northwest corner
-    ];
-    
-    // Create the polygon with a more visible outline
-    return new window.google.maps.Polygon({
-      paths: polygonCoords,
-      strokeColor: '#2563EB',     // Blue outline
-      strokeOpacity: 0.9,         // More visible
-      strokeWeight: 2.5,          // Slightly thicker line
-      fillColor: '#2563EB',       // Blue fill
-      fillOpacity: 0.4,           // Slightly more opaque for better visibility
-      zIndex: 100                 // Ensure it renders above other map elements
-    });
-  } catch (error) {
-    console.error("Error creating roof polygon:", error);
-    return null;
-  }
-};
-    // Load the Google Maps script
     loadGoogleMapsScript();
-    
-    // Cleanup
+
     return () => {
-      // Clean up map resources if needed
+      if (map) {
+        window.google.maps.event.clearInstanceListeners(map);
+      }
     };
   }, [formData.lat, formData.lng, formData.address]);
-  
+
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
@@ -156,17 +166,38 @@ const createRoofPolygon = (lat, lng) => {
         ref={mapContainerRef} 
         className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden"
       >
-        {/* Loading indicator or fallback */}
-        {(!window.google || !formData.lat || !formData.lng) && (
+        {(loading || error) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
-            <Camera size={40} className="mb-2" />
-            <p className="text-sm">Loading satellite imagery...</p>
+            {error ? (
+              <>
+                <Camera size={40} className="mb-2" />
+                <p className="text-sm text-red-500">{error}</p>
+                <p className="text-xs mt-1">Showing estimated roof size</p>
+              </>
+            ) : (
+              <>
+                <Camera size={40} className="mb-2" />
+                <p className="text-sm">Loading satellite imagery...</p>
+              </>
+            )}
           </div>
         )}
         
         <div className="absolute top-2 right-2 flex flex-col z-10">
-          <button type="button" onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) + 1)} className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1">+</button>
-          <button type="button" onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) - 1)} className="bg-white w-8 h-8 rounded shadow flex items-center justify-center">-</button>
+          <button 
+            type="button" 
+            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) + 1)} 
+            className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
+          >
+            +
+          </button>
+          <button 
+            type="button" 
+            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) - 1)} 
+            className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
+          >
+            -
+          </button>
         </div>
         
         <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-10">
