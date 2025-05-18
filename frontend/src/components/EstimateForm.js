@@ -1,7 +1,7 @@
 // src/components/EstimateForm.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Home, MapPin, ChevronLeft, ChevronRight, Camera, Ruler, Calculator, DollarSign } from 'lucide-react';
+import { Home } from 'lucide-react';
 
 // Import step components
 import AddressStep from './steps/AddressStep';
@@ -16,6 +16,7 @@ import EstimateResultStep from './steps/EstimateResultStep';
 import ContactInfoStep from './steps/ContactInfoStep';
 
 // Import services
+import apiService from '../services/apiService';
 import googleMapsService from '../services/googleMapsService';
 import openAIService from '../services/openAIService';
 
@@ -113,7 +114,7 @@ const EstimateForm = () => {
     }
     
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
-  }, [currentStep, formData, updateFormData]);
+  }, [currentStep, formData, updateFormData, steps.length]);
   
   // Navigate to previous step
   const prevStep = useCallback(() => {
@@ -190,9 +191,9 @@ const EstimateForm = () => {
             Powered by AI • Satellite Data • Local Market Analysis
           </p>
           <div className="flex space-x-4">
-            <a href="#" className="text-sm text-gray-600 hover:text-primary-600">Privacy Policy</a>
-            <a href="#" className="text-sm text-gray-600 hover:text-primary-600">Terms of Service</a>
-            <a href="#" className="text-sm text-gray-600 hover:text-primary-600">Contact</a>
+          <a href="/privacy" className="text-sm text-gray-600 hover:text-primary-600">Privacy Policy</a>
+          <a href="/terms" className="text-sm text-gray-600 hover:text-primary-600">Terms of Service</a>
+          <a href="/contact" className="text-sm text-gray-600 hover:text-primary-600">Contact</a>
           </div>
         </div>
       </footer>
