@@ -60,6 +60,8 @@ app.use((req, res, next) => {
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/maps', googleMapsRoutes);
 app.use('/api', apiRoutes);
+app.use('/api/metrics', require('./routes/metricsRoutes'));
+app.use('/api/roof', require('./routes/roofAnalysisRoutes'));
 
 // Simple health check route
 app.get('/', (req, res) => {
