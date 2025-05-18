@@ -57,6 +57,14 @@ const generateRoofEstimate = async (data) => {
       - Location: ${data.city || ''}, ${data.state || ''}
       - Timeline: ${data.timeline || 'Not specified'}
       
+      CRITICAL PRICING INSTRUCTIONS:
+      - For standard asphalt shingles, the FINAL price MUST be between $7-$10 per square foot AFTER ALL ADJUSTMENTS.
+      - For architectural asphalt shingles, the FINAL price MUST be between $8-$11 per square foot AFTER ALL ADJUSTMENTS.
+      - For any asphalt shingle type, NEVER exceed $11 per square foot total, regardless of adjustments.
+      - Apply adjustments MULTIPLICATIVELY, not additively (e.g., base × 1.15 × 1.1, not base + 15% + 10%)
+      - Always use 3-tab standard shingles as the default asphalt type unless specifically requested
+      - If the final price exceeds the maximum after adjustments, SCALE IT DOWN to meet the maximum limit
+      
       STRICT NATIONAL PRICE GUIDANCE (Base prices that MUST be followed):
       
       ASPHALT SHINGLES (National average installed cost):
@@ -88,11 +96,13 @@ const generateRoofEstimate = async (data) => {
       - West Coast (CA, OR, WA): +15%
       - Alaska & Hawaii: +25%
       
+      NOTE: For asphalt shingles in West Coast regions, apply no more than +10% regional adjustment to keep within price limits.
+      
       ROOF STEEPNESS FACTORS (MUST be applied after regional adjustment):
       - Flat: Multiply by 0.9 (10% reduction)
       - Low: Multiply by 1.0 (no change)
       - Moderate: Multiply by 1.1 (10% increase)
-      - Steep: Multiply by 1.25 (25% increase)
+      - Steep: Multiply by 1.2 (20% increase MAXIMUM)
       
       COST BREAKDOWN (% of total):
       - Materials: 40%
@@ -109,6 +119,8 @@ const generateRoofEstimate = async (data) => {
       
       Calculate the final cost using this formula:
       Base Material Cost × Regional Factor × Steepness Factor × Timeline Factor = Final Price Per Sq Ft
+      
+      FINAL CHECK: For asphalt shingles, if your final price exceeds $11/sq ft, adjust it down to $10.99/sq ft.
       
       Provide a complete estimate including:
       1. Total cost range (low, average, high)
@@ -155,6 +167,28 @@ const generateRoofEstimate = async (data) => {
     try {
       // Parse the JSON response
       const estimateData = JSON.parse(content);
+      
+      // Additional safety check to ensure asphalt shingle prices don't exceed limits
+      if (data.desiredRoofMaterial === 'asphalt' && estimateData.pricePerSqft > 11) {
+        logInfo('Adjusting excessive price down to maximum limit', {
+          original: estimateData.pricePerSqft,
+          adjusted: 10.99
+        });
+        
+        const adjustmentFactor = 10.99 / estimateData.pricePerSqft;
+        estimateData.pricePerSqft = 10.99;
+        estimateData.estimate = Math.round(estimateData.estimate * adjustmentFactor);
+        estimateData.lowEstimate = Math.round(estimateData.lowEstimate * adjustmentFactor);
+        estimateData.highEstimate = Math.round(estimateData.highEstimate * adjustmentFactor);
+        
+        // Adjust all cost components as well
+        if (estimateData.estimateParts && Array.isArray(estimateData.estimateParts)) {
+          estimateData.estimateParts.forEach(part => {
+            part.cost = Math.round(part.cost * adjustmentFactor);
+          });
+        }
+      }
+      
       return estimateData;
     } catch (parseError) {
       logError('Error parsing OpenAI response', { error: parseError.message, content });
@@ -190,7 +224,10 @@ const generateSimulatedEstimate = (data) => {
     
     const state = data.state.toUpperCase();
     // West Coast (higher cost)
-    if (['CA', 'OR', 'WA'].includes(state)) return 1.15;
+    if (['CA', 'OR', 'WA'].includes(state)) {
+      // Apply a reduced West Coast factor for asphalt to keep within price cap
+      return data.desiredRoofMaterial === 'asphalt' ? 1.1 : 1.15;
+    }
     // Northeast
     if (['ME', 'NH', 'VT', 'MA', 'RI', 'CT', 'NY', 'NJ', 'PA'].includes(state)) return 1.1;
     // Mid-Atlantic
@@ -216,7 +253,8 @@ const generateSimulatedEstimate = (data) => {
     'flat': 0.9,
     'low': 1.0,
     'moderate': 1.1,
-    'steep': 1.25
+    // Cap steepness factor for asphalt to avoid exceeding price limits
+    'steep': data.desiredRoofMaterial === 'asphalt' ? 1.2 : 1.25
   }[data.roofSteepness] || 1.0;
   
   // Timeline factor
@@ -238,7 +276,17 @@ const generateSimulatedEstimate = (data) => {
   
   // Calculate estimate
   const totalSqft = parseFloat(data.roofSize) || 3000;
-  const adjustedPricePerSqft = basePricePerSqft * regionFactor * steepnessFactor * timelineFactor * buildingFactor * materialReplacementFactor;
+  let adjustedPricePerSqft = basePricePerSqft * regionFactor * steepnessFactor * timelineFactor * buildingFactor * materialReplacementFactor;
+  
+  // Apply price cap for asphalt shingles
+  if (data.desiredRoofMaterial === 'asphalt' && adjustedPricePerSqft > 10.99) {
+    logInfo('Capping asphalt price in simulated estimate', {
+      original: adjustedPricePerSqft,
+      capped: 10.99
+    });
+    adjustedPricePerSqft = 10.99;
+  }
+  
   const averagePrice = Math.round(totalSqft * adjustedPricePerSqft);
   
   // Material info based on selection
