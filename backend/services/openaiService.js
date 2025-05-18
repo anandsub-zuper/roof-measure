@@ -1,11 +1,41 @@
+// backend/services/openAIService.js
 const axios = require('axios');
 
 // OpenAI API configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-const OPENAI_MODEL = 'gpt-4-turbo';
+const OPENAI_MODEL = 'gpt-4o';
+const OPENAI_VISION_MODEL = 'gpt-4o';
 
-// Generate roof estimate
+/**
+ * Make a request to OpenAI API with standardized error handling
+ * @param {Object} requestData - The request payload
+ * @returns {Promise<Object>} - The OpenAI API response
+ */
+const makeOpenAIRequest = async (requestData) => {
+  try {
+    const response = await axios.post(
+      OPENAI_API_URL,
+      requestData,
+      {
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('OpenAI API error:', error.response?.data || error.message);
+    throw error;
+  }
+};
+
+/**
+ * Generate roof estimate using OpenAI
+ * @param {Object} data - The form data for the estimate
+ * @returns {Promise<Object>} - The estimate data
+ */
 const generateRoofEstimate = async (data) => {
   try {
     // Construct prompt for OpenAI
@@ -29,27 +59,20 @@ const generateRoofEstimate = async (data) => {
     `;
     
     // Call OpenAI API
-    const response = await axios.post(
-      OPENAI_API_URL,
-      {
-        model: OPENAI_MODEL,
-        messages: [
-          { role: "system", content: "You are an expert roofing contractor with detailed knowledge of costs and material requirements." },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.2,
-        max_tokens: 1500
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    const requestData = {
+      model: OPENAI_MODEL,
+      messages: [
+        { role: "system", content: "You are an expert roofing contractor with detailed knowledge of costs and material requirements." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.2,
+      max_tokens: 1500
+    };
+    
+    const responseData = await makeOpenAIRequest(requestData);
     
     // Extract the JSON response
-    const content = response.data.choices[0].message.content;
+    const content = responseData.choices[0].message.content;
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     
     if (jsonMatch) {
@@ -60,9 +83,117 @@ const generateRoofEstimate = async (data) => {
     // Fallback to simulated estimate if parsing fails
     return generateSimulatedEstimate(data);
   } catch (error) {
-    console.error('OpenAI error:', error);
+    console.error('Error generating estimate:', error);
     // Fallback to simulated estimate on API error
     return generateSimulatedEstimate(data);
+  }
+};
+
+/**
+ * Analyze a roof image to identify roof boundaries
+ * @param {string} imageBase64 - The base64-encoded image data
+ * @returns {Promise<Array>} - Array of coordinates for the roof polygon
+ */
+const analyzeRoofImage = async (imageBase64) => {
+  try {
+    if (!imageBase64) {
+      throw new Error('No image data provided');
+    }
+    
+    // Create the OpenAI Vision API request
+    const requestData = {
+      model: OPENAI_VISION_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Analyze this satellite image and identify the roof boundaries. Return ONLY a JSON array of coordinates representing the roof polygon. Format should be [{lat: number, lng: number}, ...]. Be precise and include only the main building roof."
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${imageBase64}`
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 1000
+    };
+    
+    // Make the API request
+    const responseData = await makeOpenAIRequest(requestData);
+    
+    // Extract the JSON array from the response
+    const responseText = responseData.choices[0].message.content;
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+    
+    if (jsonMatch) {
+      try {
+        const coordinates = JSON.parse(jsonMatch[0]);
+        
+        // Validate the coordinates
+        if (Array.isArray(coordinates) && coordinates.length >= 3) {
+          const validCoordinates = coordinates.every(coord => 
+            typeof coord === 'object' && 
+            typeof coord.lat === 'number' && 
+            typeof coord.lng === 'number'
+          );
+          
+          if (validCoordinates) {
+            return coordinates;
+          }
+        }
+        throw new Error('Invalid coordinates format');
+      } catch (parseError) {
+        console.error("Failed to parse coordinates from OpenAI response:", parseError);
+        throw new Error('Failed to parse AI response');
+      }
+    }
+    
+    throw new Error('Unable to extract coordinates from AI response');
+  } catch (error) {
+    console.error('Error analyzing roof image:', error);
+    throw error;
+  }
+};
+
+/**
+ * Answer a roofing-related question using OpenAI
+ * @param {string} question - The question to ask
+ * @returns {Promise<Object>} - The answer data
+ */
+const askRoofingQuestion = async (question) => {
+  try {
+    const requestData = {
+      model: OPENAI_MODEL,
+      messages: [
+        { 
+          role: "system", 
+          content: "You are an expert roofing contractor with extensive knowledge about roofing materials, installation, maintenance, and costs. Provide helpful, accurate information to homeowners."
+        },
+        { 
+          role: "user", 
+          content: question 
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1000
+    };
+    
+    const responseData = await makeOpenAIRequest(requestData);
+    return {
+      answer: responseData.choices[0].message.content,
+      metadata: {
+        model: OPENAI_MODEL,
+        timestamp: new Date().toISOString()
+      }
+    };
+  } catch (error) {
+    console.error('Error answering roofing question:', error);
+    throw error;
   }
 };
 
@@ -107,5 +238,7 @@ const generateSimulatedEstimate = (data) => {
 };
 
 module.exports = {
-  generateRoofEstimate
+  generateRoofEstimate,
+  analyzeRoofImage,
+  askRoofingQuestion
 };
