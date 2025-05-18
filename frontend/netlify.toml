@@ -1,4 +1,4 @@
-# netlify.toml - Properly formatted and complete
+# netlify.toml - Updated with your actual API paths
 
 # Build configuration
 [build]
@@ -11,8 +11,8 @@
 
 # Redirect API requests to your Heroku backend
 [[redirects]]
-  from = "/api/*"
-  to = "https://roof-measure-5164a9a88417.herokuapp.com/api/:splat"
+  from = "/api/maps/*"
+  to = "https://roof-measure-5164a9a88417.herokuapp.com/api/maps/:splat"
   status = 200
   force = true
 
