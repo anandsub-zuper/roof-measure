@@ -10,9 +10,17 @@ let loadingPromise = null;
  * @returns {Promise} Promise that resolves with the Google Maps object
  */
 export function loadGoogleMapsApi() {
-  if (mapsLoaded) return Promise.resolve(window.google.maps);
-  if (loadingPromise) return loadingPromise;
+  if (mapsLoaded && window.google && window.google.maps) {
+    console.log("Google Maps already loaded, reusing");
+    return Promise.resolve(window.google.maps);
+  }
+  
+  if (loadingPromise) {
+    console.log("Google Maps API loading in progress, waiting");
+    return loadingPromise;
+  }
 
+  console.log("Starting to load Google Maps API");
   loadingPromise = new Promise((resolve, reject) => {
     const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
     
@@ -24,14 +32,16 @@ export function loadGoogleMapsApi() {
 
     // Create script element
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry,drawing`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry,drawing&callback=initGoogleMapsCallback`;
     script.async = true;
     script.defer = true;
     
-    script.onload = () => {
-      console.log("Google Maps API loaded successfully");
+    // Create global callback
+    window.initGoogleMapsCallback = function() {
+      console.log("Google Maps API loaded successfully via callback");
       mapsLoaded = true;
       resolve(window.google.maps);
+      delete window.initGoogleMapsCallback;
     };
     
     script.onerror = (error) => {
@@ -40,6 +50,7 @@ export function loadGoogleMapsApi() {
       reject(error);
     };
     
+    // Add script to document
     document.head.appendChild(script);
   });
 
@@ -47,63 +58,83 @@ export function loadGoogleMapsApi() {
 }
 
 /**
- * Initialize a map in the provided container
- * @param {HTMLElement} container - The map container element
- * @param {Object} options - Map options
- * @returns {Promise} - Resolves with map instance
+ * Calculate area of a polygon in square feet
+ * @param {Array} coordinates - Array of coordinates or google.maps.LatLng objects
+ * @returns {number} Area in square feet
  */
-export const initMap = async (container, options = {}) => {
-  if (!container) return null;
+export const calculatePolygonArea = (coordinates) => {
+  if (!coordinates || coordinates.length < 3 || !window.google?.maps?.geometry?.spherical) {
+    console.warn("Cannot calculate area - no coordinates or Geometry library missing");
+    return 3000; // Default fallback
+  }
   
   try {
-    const maps = await loadGoogleMapsApi();
-    
-    const defaultOptions = {
-      zoom: 19,
-      mapTypeId: 'satellite',
-      tilt: 0,
-      mapTypeControl: false,
-      streetViewControl: false,
-      rotateControl: false,
-      fullscreenControl: true,
-      zoomControlOptions: {
-        position: window.google.maps.ControlPosition.RIGHT_TOP
+    // Convert to LatLng objects if needed
+    const latLngCoords = coordinates.map(coord => {
+      if (typeof coord.lat === 'function') {
+        return coord; // Already a LatLng object
       }
-    };
+      return new window.google.maps.LatLng(coord.lat, coord.lng);
+    });
     
-    const map = new maps.Map(
-      container, 
-      { ...defaultOptions, ...options }
-    );
+    // Calculate area in square meters
+    const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords);
     
-    return map;
+    // Convert to square feet (1 sq meter = 10.7639 sq feet)
+    const areaInSquareFeet = Math.round(areaInSquareMeters * 10.7639);
+    
+    console.log("Calculated area:", areaInSquareFeet, "sq ft");
+    
+    // Validate calculated area
+    if (areaInSquareFeet < 500 || areaInSquareFeet > 10000) {
+      console.warn("Suspicious area calculation:", areaInSquareFeet, "using default");
+      return 3000; // Return reasonable default for suspicious values
+    }
+    
+    return areaInSquareFeet;
   } catch (error) {
-    console.error('Error initializing map:', error);
-    throw error;
+    console.error("Error calculating polygon area:", error);
+    return 3000; // Default fallback
   }
 };
 
 /**
- * Initialize Places Autocomplete
- * @param {HTMLInputElement} inputElement - The input field for address
- * @returns {Promise<google.maps.places.Autocomplete>} - Autocomplete instance
+ * Create estimated polygon based on coordinates
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {Array} Array of coordinate objects
  */
-export const initAutocomplete = async (inputElement) => {
-  if (!inputElement) return null;
-  
-  try {
-    await loadGoogleMapsApi();
-    
-    const autocomplete = new window.google.maps.places.Autocomplete(inputElement, {
-      types: ['address'],
-      componentRestrictions: { country: 'us' }
-    });
-    
-    return autocomplete;
-  } catch (error) {
-    console.error('Error initializing autocomplete:', error);
+export const createEstimatedPolygon = (lat, lng) => {
+  if (isNaN(parseFloat(lat)) || isNaN(parseFloat(lng))) {
+    console.error("Invalid coordinates for polygon creation:", { lat, lng });
     return null;
   }
+  
+  // Parse coordinates to ensure they're numbers
+  const validLat = parseFloat(lat);
+  const validLng = parseFloat(lng);
+  
+  // Convert meters to degrees at the given latitude
+  const metersToDegrees = (meters) => {
+    const latRad = validLat * (Math.PI / 180);
+    const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
+    const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
+    return {
+      lat: meters / latDeg,
+      lng: meters / lngDeg
+    };
+  };
+
+  // Create an average sized house polygon (about 15-20 meters)
+  const conversion = metersToDegrees(18);
+  
+  // Create polygon with slight irregularities for realism
+  return [
+    { lat: validLat - conversion.lat * 0.6, lng: validLng - conversion.lng * 0.8 }, // SW
+    { lat: validLat - conversion.lat * 0.6, lng: validLng + conversion.lng * 0.8 }, // SE
+    { lat: validLat + conversion.lat * 0.6, lng: validLng + conversion.lng * 0.8 }, // NE
+    { lat: validLat + conversion.lat * 0.6, lng: validLng - conversion.lng * 0.8 }  // NW
+  ];
 };
 
 /**
@@ -114,7 +145,10 @@ export const initAutocomplete = async (inputElement) => {
  * @returns {google.maps.Polygon} The created polygon
  */
 export const createPolygon = (map, coordinates, options = {}) => {
-  if (!map || !coordinates || coordinates.length < 3) return null;
+  if (!map || !coordinates || coordinates.length < 3) {
+    console.error("Cannot create polygon - missing map or coordinates");
+    return null;
+  }
   
   // Convert coordinates to LatLng objects if they're not already
   const latLngCoords = coordinates.map(coord => {
@@ -144,127 +178,9 @@ export const createPolygon = (map, coordinates, options = {}) => {
   return polygon;
 };
 
-/**
- * Calculate area of a polygon in square feet
- * @param {Array} coordinates - Array of coordinates or google.maps.LatLng objects
- * @returns {number} Area in square feet
- */
-export const calculatePolygonArea = (coordinates) => {
-  if (!coordinates || coordinates.length < 3 || !window.google?.maps?.geometry?.spherical) {
-    return 3000; // Default fallback
-  }
-  
-  try {
-    // Convert to LatLng objects if needed
-    const latLngCoords = coordinates.map(coord => {
-      if (typeof coord.lat === 'function') {
-        return coord; // Already a LatLng object
-      }
-      return new window.google.maps.LatLng(coord.lat, coord.lng);
-    });
-    
-    // Calculate area in square meters
-    const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords);
-    
-    // Convert to square feet (1 sq meter = 10.7639 sq feet)
-    const areaInSquareFeet = Math.round(areaInSquareMeters * 10.7639);
-    
-    // Validate calculated area
-    if (areaInSquareFeet < 500 || areaInSquareFeet > 10000) {
-      return 3000; // Return reasonable default for suspicious values
-    }
-    
-    return areaInSquareFeet;
-  } catch (error) {
-    console.error("Error calculating polygon area:", error);
-    return 3000; // Default fallback
-  }
-};
-
-/**
- * Create estimated polygon based on coordinates
- * @param {number} lat - Latitude
- * @param {number} lng - Longitude
- * @returns {Array} Array of coordinate objects
- */
-export const createEstimatedPolygon = (lat, lng) => {
-  if (!lat || !lng) return null;
-  
-  // Convert meters to degrees at the given latitude
-  const metersToDegrees = (meters) => {
-    const latRad = lat * (Math.PI / 180);
-    const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
-    const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
-    return {
-      lat: meters / latDeg,
-      lng: meters / lngDeg
-    };
-  };
-
-  // Create an average sized house polygon (about 15-20 meters)
-  const conversion = metersToDegrees(18);
-  return [
-    { lat: lat - conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }, // SW
-    { lat: lat - conversion.lat * 0.6, lng: lng + conversion.lng * 0.8 }, // SE
-    { lat: lat + conversion.lat * 0.6, lng: lng + conversion.lng * 0.8 }, // NE
-    { lat: lat + conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }  // NW
-  ];
-};
-
-/**
- * Setup drawing tools for manual roof outlining
- * @param {google.maps.Map} map - The map instance
- * @param {Function} onComplete - Callback when polygon is completed
- * @returns {google.maps.drawing.DrawingManager} The drawing manager
- */
-export const setupDrawingTools = (map, onComplete) => {
-  if (!map || !window.google?.maps?.drawing) return null;
-  
-  const drawingManager = new window.google.maps.drawing.DrawingManager({
-    drawingMode: window.google.maps.drawing.OverlayType.POLYGON,
-    drawingControl: true,
-    drawingControlOptions: {
-      position: window.google.maps.ControlPosition.TOP_CENTER,
-      drawingModes: [window.google.maps.drawing.OverlayType.POLYGON]
-    },
-    polygonOptions: {
-      fillColor: '#2563EB',
-      strokeColor: '#2563EB',
-      fillOpacity: 0.4,
-      strokeWeight: 3,
-      editable: true,
-      zIndex: 100
-    }
-  });
-
-  drawingManager.setMap(map);
-
-  // Listen for polygon complete event
-  if (onComplete && typeof onComplete === 'function') {
-    window.google.maps.event.addListener(drawingManager, 'polygoncomplete', function(polygon) {
-      // Get path array
-      const path = polygon.getPath().getArray();
-      
-      // Calculate area
-      const area = calculatePolygonArea(path);
-      
-      // Call the callback with polygon and area
-      onComplete(polygon, area);
-      
-      // Switch back to non-drawing mode
-      drawingManager.setDrawingMode(null);
-    });
-  }
-  
-  return drawingManager;
-};
-
 export default {
   loadGoogleMapsApi,
-  initMap,
-  initAutocomplete,
-  createPolygon,
   calculatePolygonArea,
   createEstimatedPolygon,
-  setupDrawingTools
+  createPolygon
 };
