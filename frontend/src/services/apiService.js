@@ -1,5 +1,4 @@
-// src/services/apiService.js - Updated with property data support
-
+// src/services/apiService.js - Complete file
 import axios from 'axios';
 
 // Get API URL from environment or default to empty string (relative URLs)
@@ -160,6 +159,103 @@ export const getRoofSizeEstimate = async (lat, lng, propertyData = null) => {
 };
 
 /**
+ * Analyze roof using OpenAI Vision
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @param {Object} propertyData - Property data for cross-validation
+ * @returns {Promise} - Resolves with roof analysis data
+ */
+export const analyzeRoof = async (lat, lng, propertyData = null) => {
+  try {
+    console.log("Analyzing roof with OpenAI Vision:", { lat, lng });
+    
+    // Generate a cache key for this coordinate pair
+    const coordKey = `analysis_${lat.toFixed(6)}_${lng.toFixed(6)}`;
+    
+    // Check cache for previous analysis
+    if (addressCache[coordKey]) {
+      console.log("Using cached roof analysis for coordinates:", { lat, lng });
+      return addressCache[coordKey];
+    }
+    
+    // Prepare request data with property information
+    const requestData = { 
+      lat, 
+      lng,
+      propertyData: propertyData ? {
+        propertyType: propertyData.propertyType,
+        buildingSize: propertyData.buildingSize,
+        stories: propertyData.stories,
+        yearBuilt: propertyData.yearBuilt,
+        roofType: propertyData.roofType
+      } : null
+    };
+    
+    // Make API request to the roof analysis endpoint
+    const response = await api.post('/api/roof/analyze', requestData);
+    console.log("Roof analysis response:", response.data);
+    
+    // Extract the recommended result or use the directly returned data
+    const result = response.data.data.recommended || response.data.data;
+    
+    // Format the response
+    const analysisResult = {
+      success: true,
+      size: result.roofArea,
+      roofPolygon: result.roofPolygon,
+      confidence: result.confidence,
+      roofShape: result.roofShape,
+      estimatedPitch: result.estimatedPitch,
+      method: result.method,
+      notes: result.notes
+    };
+    
+    // Cache the result
+    addressCache[coordKey] = analysisResult;
+    
+    return analysisResult;
+  } catch (error) {
+    console.error('Error analyzing roof:', error);
+    
+    // If analysis fails, try to return a fallback calculation from property data
+    if (propertyData && propertyData.buildingSize) {
+      console.log("Falling back to property-based roof size calculation");
+      
+      const stories = propertyData.stories || 1;
+      const footprint = propertyData.buildingSize / stories;
+      
+      // Adjust for roof pitch based on property type
+      let pitchFactor = 1.3; // Default moderate pitch
+      
+      if (propertyData.propertyType) {
+        const type = propertyData.propertyType.toLowerCase();
+        if (type.includes('flat') || type.includes('condo')) {
+          pitchFactor = 1.1; // Flatter roofs
+        } else if (type.includes('single') && type.includes('family')) {
+          pitchFactor = 1.4; // Typically more pitched
+        }
+      }
+      
+      const roofSize = Math.round(footprint * pitchFactor);
+      
+      return {
+        success: true,
+        size: roofSize,
+        roofPolygon: null, // No polygon available in fallback
+        confidence: "medium",
+        roofShape: "simple", // Assume simple in fallback
+        estimatedPitch: "moderate", // Assume moderate in fallback
+        method: "property_data_fallback",
+        notes: "Calculated from property data after vision analysis failed."
+      };
+    }
+    
+    // If no property data, re-throw the error
+    throw error;
+  }
+};
+
+/**
  * Generate a roof estimate based on form data
  * @param {Object} formData - The form data from all steps
  * @returns {Promise} - Resolves with estimate data
@@ -255,6 +351,7 @@ const apiService = {
   testApiConnection,
   getAddressCoordinates,
   getRoofSizeEstimate,
+  analyzeRoof,
   generateRoofEstimate,
   submitEstimate,
   clearAddressCache
