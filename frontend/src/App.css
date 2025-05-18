@@ -1,0 +1,7 @@
+/* src/App.css */
+/* This file is intentionally minimal since we're using Tailwind CSS for styling */
+
+.app {
+  width: 100%;
+  height: 100%;
+}
