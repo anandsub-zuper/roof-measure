@@ -35,6 +35,8 @@ const EstimateForm = () => {
     lat: null,
     lng: null,
     roofSize: '',
+    initialRoofSize: '', // Keep original API value for reference
+    roofPolygon: null, // Store the polygon coordinates from the backend
     roofSizeAuto: true,
     roofSteepness: '',
     buildingType: '',
@@ -128,12 +130,23 @@ const getAddressDetails = useCallback(async () => {
             const sizeData = roofSizeData.data || roofSizeData;
             const roofSize = parseInt(sizeData.size || 0, 10);
             
+            // Store the roof size in a cache for this address to ensure consistency
+            const addressKey = formData.address.replace(/[^a-zA-Z0-9]/g, '_');
+            localStorage.setItem(`roofSize_${addressKey}`, roofSize.toString());
+            
+            // Important: Also capture the roof polygon if available
+            if (sizeData.roofPolygon && Array.isArray(sizeData.roofPolygon)) {
+              console.log("Received roof polygon from API:", sizeData.roofPolygon);
+              updateFormData('roofPolygon', sizeData.roofPolygon);
+            }
+            
             if (!isNaN(roofSize) && roofSize > 0) {
               console.log("Setting roof size to:", roofSize);
               updateFormData('roofSize', roofSize);
+              updateFormData('initialRoofSize', roofSize); // Store the initial value for reference
             } else {
               console.log("Invalid roof size, using default");
-              updateFormData('roofSize', 3000);
+              updateFormData('roofSize', 3000); // Default fallback size
             }
           } else {
             updateFormData('roofSize', 3000); // Default fallback size
