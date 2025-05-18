@@ -76,35 +76,62 @@ const EstimateForm = () => {
     setIsLoading(true);
     try {
       // Get coordinates from address
-      const addressData = await apiService.getAddressCoordinates(formData.address);
+      const response = await apiService.getAddressCoordinates(formData.address);
+      console.log("Geocoding API response:", response);
       
-      if (addressData && addressData.success) {
-        // Update form with coordinates and address components
-        updateFormData('lat', addressData.lat);
-        updateFormData('lng', addressData.lng);
-        updateFormData('city', addressData.city || '');
-        updateFormData('state', addressData.state || '');
-        updateFormData('zipCode', addressData.zipCode || '');
+      // Fixed: Check response structure and adapt to different possible formats
+      if (response) {
+        // Extract the actual data, handling different response structures
+        // Some APIs return {success: true, data: {...}} while others return the data directly
+        const data = response.data || response;
         
-        // Get roof size if coordinates are available
-        if (addressData.lat && addressData.lng) {
+        // Check if we have lat/lng in the response
+        const lat = parseFloat(data.lat);
+        const lng = parseFloat(data.lng);
+        
+        console.log("Extracted coordinates:", { lat, lng });
+        
+        if (!isNaN(lat) && !isNaN(lng)) {
+          // Update form with coordinates and address components
+          updateFormData('lat', lat);
+          updateFormData('lng', lng);
+          updateFormData('city', data.city || '');
+          updateFormData('state', data.state || '');
+          updateFormData('zipCode', data.zipCode || '');
+          
+          console.log("Updated formData with coordinates:", { lat, lng });
+          
+          // Get roof size if coordinates are available
           try {
-            const roofSizeData = await apiService.getRoofSizeEstimate(
-              addressData.lat, 
-              addressData.lng
-            );
+            const roofSizeData = await apiService.getRoofSizeEstimate(lat, lng);
+            console.log("Roof size API response:", roofSizeData);
             
-            if (roofSizeData && roofSizeData.success) {
-              updateFormData('roofSize', roofSizeData.size || 3000);
+            if (roofSizeData) {
+              // Extract size data, handling different response structures
+              const sizeData = roofSizeData.data || roofSizeData;
+              const roofSize = parseInt(sizeData.size || 0, 10);
+              
+              if (!isNaN(roofSize) && roofSize > 0) {
+                console.log("Setting roof size to:", roofSize);
+                updateFormData('roofSize', roofSize);
+              } else {
+                console.log("Invalid roof size, using default");
+                updateFormData('roofSize', 3000); // Default fallback size
+              }
+            } else {
+              updateFormData('roofSize', 3000); // Default fallback size
             }
           } catch (sizeError) {
             console.error("Error getting roof size:", sizeError);
-            // Use default roof size
-            updateFormData('roofSize', 3000);
+            updateFormData('roofSize', 3000); // Default fallback size
           }
+        } else {
+          console.error("Invalid coordinates in response:", { lat, lng });
+          alert("Could not determine the location coordinates. Please try a different address.");
         }
       } else {
-        throw new Error("Failed to get address coordinates");
+        console.error("Invalid geocoding response format");
+        alert("Error processing address. Please try again.");
       }
     } catch (error) {
       console.error("Error processing address:", error);
@@ -119,11 +146,14 @@ const EstimateForm = () => {
     setIsLoading(true);
     try {
       const response = await apiService.generateRoofEstimate(formData);
+      console.log("Estimate API response:", response);
       
-      if (response && response.success) {
-        setEstimateResult(response.data || response);
+      if (response) {
+        // Handle different response structures
+        const estimateData = response.data || response;
+        setEstimateResult(estimateData);
       } else {
-        throw new Error("Failed to generate estimate");
+        throw new Error("Failed to generate estimate - empty response");
       }
     } catch (error) {
       console.error("Error generating estimate:", error);
@@ -162,7 +192,9 @@ const EstimateForm = () => {
         estimateResult
       });
       
-      if (response && response.success) {
+      console.log("Form submission response:", response);
+      
+      if (response && (response.success || response.reference)) {
         navigate('/thank-you');
       } else {
         throw new Error("Failed to submit estimate");
@@ -182,6 +214,16 @@ const EstimateForm = () => {
       .catch(error => console.error("API connection failed:", error));
   }, []);
   
+  // Debug formData changes
+  useEffect(() => {
+    console.log("FormData updated:", {
+      address: formData.address,
+      lat: formData.lat,
+      lng: formData.lng,
+      roofSize: formData.roofSize
+    });
+  }, [formData.address, formData.lat, formData.lng, formData.roofSize]);
+  
   // Get current step component
   const CurrentStepComponent = steps[currentStep].component;
   
@@ -199,11 +241,11 @@ const EstimateForm = () => {
           
           {currentStep < steps.length - 1 && (
             <div className="flex items-center">
-              <span className="text-sm font-medium mr-2">Step {currentStep + 1}/{steps.length}</span>
+              <span className="text-sm font-medium mr-2">Step {currentStep + 1}/{steps.length - 1}</span>
               <div className="w-20 h-2 bg-gray-200 rounded-full">
                 <div 
                   className="h-full bg-primary-600 rounded-full" 
-                  style={{width: `${((currentStep + 1) / steps.length) * 100}%`}}
+                  style={{width: `${((currentStep + 1) / (steps.length - 1)) * 100}%`}}
                 ></div>
               </div>
             </div>
