@@ -48,60 +48,71 @@ const generateRoofEstimate = async (data) => {
   try {
     // Construct prompt for OpenAI
     const prompt = `
- Generate a detailed roofing cost estimate with the following parameters:
-      - Roof size: ${data.roofSize} square feet
-      - Roof steepness: ${data.roofSteepness}
-      - Desired material: ${data.desiredRoofMaterial}
-      - Current material: ${data.currentRoofMaterial || 'Not specified'}
-      - Building type: ${data.buildingType || 'Not specified'}
-      - Location: ${data.city || ''}, ${data.state || ''}
-      - Timeline: ${data.timeline || 'Not specified'}
-      - Financing preferences: ${data.financing || 'Not specified'}
-      
-      IMPORTANT PRICE GUIDANCE (Use these ranges for accuracy):
-      - Asphalt shingles: $4-7/sq ft for materials, $7-15/sq ft installed total
-      - Metal roofing: $7-12/sq ft for materials, $12-25/sq ft installed total
-      - Tile: $10-15/sq ft for materials, $15-30/sq ft installed total
-      - Cedar shakes: $6-10/sq ft for materials, $12-22/sq ft installed total
-      
-      Regional adjustment factors:
-      - West Coast (WA, OR, CA): +10-15% above national average
-      - Northeast (NY, MA, CT): +5-10% above national average
-      - Midwest: -5% below national average
-      - South: -10% below national average
-      
-      Typical cost breakdown percentages:
-      - Materials: 35-45% of total cost
-      - Labor: 40-50% of total cost
-      - Removal & Disposal: 10-15% of total cost
-      - Permits & Overhead: 5-10% of total cost
-      
-      Please provide a complete estimate including:
-      1. Total cost range (low, average, high)
-      2. Cost breakdown by category (materials, labor, removal, etc.)
-      3. Price per square foot
-      4. Factors affecting the price
-      5. Material information (lifespan, pros, cons)
-      
-      Format the response as a JSON object with the following structure:
-      {
-        "lowEstimate": number,
-        "estimate": number,
-        "highEstimate": number,
-        "pricePerSqft": number,
-        "estimateParts": [
-          { "name": string, "cost": number }
-        ],
-        "estimateFactors": [
-          { "factor": string, "impact": string, "description": string }
-        ],
-        "materialInfo": {
-          "lifespan": string,
-          "pros": [string],
-          "cons": [string]
-        }
-      }
-    `;
+ const prompt = `
+  Generate a detailed roofing cost estimate with the following parameters:
+  - Roof size: ${data.roofSize} square feet
+  - Roof steepness: ${data.roofSteepness}
+  - Desired material: ${data.desiredRoofMaterial}
+  - Current material: ${data.currentRoofMaterial || 'Not specified'}
+  - Building type: ${data.buildingType || 'Not specified'}
+  - Location: ${data.city || ''}, ${data.state || ''}
+  - Timeline: ${data.timeline || 'Not specified'}
+  
+  STRICT NATIONAL PRICE GUIDANCE (Base prices that MUST be followed):
+  
+  ASPHALT SHINGLES (National average installed cost):
+  - 3-tab standard: $5.50-$7.50 per sq ft
+  - Architectural/dimensional: $7.00-$9.50 per sq ft
+  - Premium designer: $8.00-$11.00 per sq ft
+  
+  METAL ROOFING (National average installed cost):
+  - Standing seam: $10.00-$14.00 per sq ft
+  - Metal shingles: $8.50-$12.00 per sq ft
+  - Corrugated panels: $7.00-$10.00 per sq ft
+  
+  TILE ROOFING (National average installed cost):
+  - Concrete tile: $12.00-$16.00 per sq ft
+  - Clay tile: $15.00-$20.00 per sq ft
+  
+  CEDAR SHAKES (National average installed cost):
+  - Cedar shingles: $9.00-$13.00 per sq ft
+  - Cedar shakes: $11.00-$16.00 per sq ft
+  
+  REGIONAL ADJUSTMENT FACTORS (MUST be applied to base prices):
+  - Northeast (ME, NH, VT, MA, RI, CT, NY, NJ, PA): +10%
+  - Mid-Atlantic (DE, MD, DC, VA, WV): +5%
+  - Southeast (NC, SC, GA, FL, AL, MS, TN, KY): -5%
+  - Midwest (OH, IN, IL, MI, WI, MN, IA, MO): -3%
+  - Great Plains (ND, SD, NE, KS, OK): -10%
+  - Rocky Mountains (MT, ID, WY, CO, UT): +5%
+  - Southwest (AZ, NM, TX, NV): -7%
+  - West Coast (CA, OR, WA): +15%
+  - Alaska & Hawaii: +25%
+  
+  ROOF STEEPNESS FACTORS (MUST be applied after regional adjustment):
+  - Flat: Multiply by 0.9 (10% reduction)
+  - Low: Multiply by 1.0 (no change)
+  - Moderate: Multiply by 1.1 (10% increase)
+  - Steep: Multiply by 1.25 (25% increase)
+  
+  COST BREAKDOWN (% of total):
+  - Materials: 40%
+  - Labor: 45%
+  - Removal & Disposal: 8%
+  - Permits & Overhead: 7%
+  
+  Additional modifiers:
+  - Emergency timeline: +10%
+  - ASAP timeline: +5%
+  - Same material replacement: -3% (simplified removal)
+  - Residential building: Standard pricing
+  - Commercial building: +15%
+  
+  Calculate the final cost using this formula:
+  Base Material Cost × Regional Factor × Steepness Factor × Timeline Factor = Final Price Per Sq Ft
+  
+  Provide the complete estimate with all the requested components in JSON format. Ensure your pricing calculations follow these guidelines precisely.
+`;
     
     // Call OpenAI API
     const requestData = {
