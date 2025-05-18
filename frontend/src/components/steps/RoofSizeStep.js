@@ -4,6 +4,8 @@ import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
 import GoogleMapContainer from '../map/GoogleMapContainer';
 import config from '../../config'; // Import the config file
+import killSwitch from '../../killSwitch';
+import DummyMapContainer from '../map/DummyMapContainer';
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [loading, setLoading] = useState(true);
