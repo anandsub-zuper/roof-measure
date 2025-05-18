@@ -1,5 +1,4 @@
-// src/components/EstimateForm.js - Complete fixed version
-
+// src/components/EstimateForm.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
@@ -16,7 +15,7 @@ import FinancingStep from './steps/FinancingStep';
 import EstimateResultStep from './steps/EstimateResultStep';
 import ContactInfoStep from './steps/ContactInfoStep';
 
-// Import services
+// Import API service
 import apiService from '../services/apiService';
 
 const EstimateForm = () => {
@@ -48,15 +47,7 @@ const EstimateForm = () => {
     termsAgreed: false
   });
   
-  // Update form data
-  const updateFormData = useCallback((field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  }, []);
-  
-  // Define steps array early - before it's used in other functions
+  // Define steps array
   const steps = [
     { component: AddressStep, title: 'Your Address' },
     { component: RoofSizeStep, title: 'Roof Size' },
@@ -70,69 +61,92 @@ const EstimateForm = () => {
     { component: ContactInfoStep, title: 'Contact Info' }
   ];
   
-  // Navigate to next step - FIXED VERSION
-  const nextStep = useCallback(async () => {
-    // Special handling for certain steps
-    if (currentStep === 0 && formData.address) {
-      setIsLoading(true);
-      try {
-        // Get coordinates from address
-        const addressData = await apiService.getAddressCoordinates(formData.address);
+  // Update form data
+  const updateFormData = useCallback((field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  }, []);
+  
+  // Special handling for address step - get coordinates and roof size
+  const getAddressDetails = useCallback(async () => {
+    if (!formData.address) return;
+    
+    setIsLoading(true);
+    try {
+      // Get coordinates from address
+      const addressData = await apiService.getAddressCoordinates(formData.address);
+      
+      if (addressData && addressData.success) {
+        // Update form with coordinates and address components
+        updateFormData('lat', addressData.lat);
+        updateFormData('lng', addressData.lng);
+        updateFormData('city', addressData.city || '');
+        updateFormData('state', addressData.state || '');
+        updateFormData('zipCode', addressData.zipCode || '');
         
-        console.log('Address data received:', addressData);
-        
-        // The API returns the data directly, not in a nested 'data' property
-        if (addressData && addressData.success) {
-          // Update form with coordinates and address components
-          updateFormData('lat', addressData.lat);
-          updateFormData('lng', addressData.lng);
-          updateFormData('city', addressData.city || '');
-          updateFormData('state', addressData.state || '');
-          updateFormData('zipCode', addressData.zipCode || '');
-          
-          // Estimate roof size if coordinates are available
-          if (addressData.lat && addressData.lng) {
+        // Get roof size if coordinates are available
+        if (addressData.lat && addressData.lng) {
+          try {
             const roofSizeData = await apiService.getRoofSizeEstimate(
               addressData.lat, 
               addressData.lng
             );
             
-            console.log('Roof size data received:', roofSizeData);
-            
             if (roofSizeData && roofSizeData.success) {
               updateFormData('roofSize', roofSizeData.size || 3000);
             }
+          } catch (sizeError) {
+            console.error("Error getting roof size:", sizeError);
+            // Use default roof size
+            updateFormData('roofSize', 3000);
           }
         }
-      } catch (error) {
-        console.error("Error processing address:", error);
-        alert("There was an error processing your address. Please try again.");
-        setIsLoading(false);
-        return;
+      } else {
+        throw new Error("Failed to get address coordinates");
       }
+    } catch (error) {
+      console.error("Error processing address:", error);
+      alert("There was an error processing your address. Please try again.");
+    } finally {
       setIsLoading(false);
     }
-    
-    // When reaching the estimate step, generate the estimate
-    if (currentStep === 7) {
-      setIsLoading(true);
-      try {
-        const estimateResponse = await apiService.generateRoofEstimate(formData);
-        if (estimateResponse && estimateResponse.success) {
-          setEstimateResult(estimateResponse);
-        }
-      } catch (error) {
-        console.error("Error generating estimate:", error);
-        alert("There was an error generating your estimate. Please try again.");
-        setIsLoading(false);
-        return;
+  }, [formData.address, updateFormData]);
+  
+  // Generate estimate
+  const generateEstimate = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await apiService.generateRoofEstimate(formData);
+      
+      if (response && response.success) {
+        setEstimateResult(response.data || response);
+      } else {
+        throw new Error("Failed to generate estimate");
       }
+    } catch (error) {
+      console.error("Error generating estimate:", error);
+      alert("There was an error generating your estimate. Please try again.");
+    } finally {
       setIsLoading(false);
     }
+  }, [formData]);
+  
+  // Navigate to next step
+  const nextStep = useCallback(async () => {
+    // Special handling for certain steps
+    if (currentStep === 0) {
+      // Address step - get coordinates and roof size
+      await getAddressDetails();
+    } else if (currentStep === 7) {
+      // Financing step - generate estimate
+      await generateEstimate();
+    }
     
-    // Move to next step
+    // Proceed to next step
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
-  }, [currentStep, formData, updateFormData, steps.length]);
+  }, [currentStep, getAddressDetails, generateEstimate, steps.length]);
   
   // Navigate to previous step
   const prevStep = useCallback(() => {
@@ -143,30 +157,29 @@ const EstimateForm = () => {
   const handleSubmit = useCallback(async () => {
     setIsLoading(true);
     try {
-      await apiService.submitEstimate({
+      const response = await apiService.submitEstimate({
         ...formData,
         estimateResult
       });
-      navigate('/thank-you');
+      
+      if (response && response.success) {
+        navigate('/thank-you');
+      } else {
+        throw new Error("Failed to submit estimate");
+      }
     } catch (error) {
       console.error("Error submitting form:", error);
       alert("There was an error submitting your information. Please try again.");
+    } finally {
       setIsLoading(false);
     }
   }, [formData, estimateResult, navigate]);
   
   // Test API connection on component mount
   useEffect(() => {
-    const testApi = async () => {
-      try {
-        await apiService.testApiConnection();
-        console.log("API connection successful!");
-      } catch (error) {
-        console.error("API connection failed:", error);
-      }
-    };
-    
-    testApi();
+    apiService.testApiConnection()
+      .then(() => console.log("API connection successful"))
+      .catch(error => console.error("API connection failed:", error));
   }, []);
   
   // Get current step component
