@@ -1,8 +1,5 @@
-// src/utils/imageUtils.js - Fixed version
-/**
- * Utility functions for capturing and processing images
- */
-import html2canvas from 'html2canvas'; // Direct import instead of dynamic import
+// src/utils/imageUtils.js
+import html2canvas from 'html2canvas';
 
 /**
  * Captures the current state of a Google Map as a base64 image
@@ -12,56 +9,38 @@ import html2canvas from 'html2canvas'; // Direct import instead of dynamic impor
 export const captureMapImage = (mapInstance) => {
   return new Promise((resolve, reject) => {
     try {
-      if (!mapInstance || !window.google?.maps) {
+      if (!mapInstance) {
         reject(new Error("Map instance not available"));
         return;
       }
 
-      // Hide the markers and UI controls temporarily for a clean capture
+      // Get the map container
       const mapDiv = mapInstance.getDiv();
-      const originalControls = [];
       
-      // Store original control visibility
-      mapInstance.controls.forEach((controlArray, position) => {
-        controlArray.forEach(control => {
-          originalControls.push({
-            control,
-            position,
-            visible: control.style.display !== 'none'
-          });
-          control.style.display = 'none';
-        });
+      // Hide UI elements temporarily
+      const controls = document.querySelectorAll('.gm-control-active, .gm-svpc, .gm-style-mtc');
+      controls.forEach(control => {
+        control.style.display = 'none';
       });
       
-      // Hide any markers
-      const markers = Array.from(mapDiv.querySelectorAll('img[src*="marker"]'));
-      markers.forEach(marker => {
-        marker.style.visibility = 'hidden';
-      });
-
-      // Use html2canvas directly without dynamic import
+      // Capture the map
       html2canvas(mapDiv, {
         useCORS: true,
         allowTaint: true,
-        scale: 1.5, // Reduced from 2 to optimize performance and file size
-        logging: false, // Disable logging
+        scale: 1.5,
+        logging: false,
       }).then(canvas => {
-        // Convert canvas to base64 image
-        const imageBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]; // Reduced quality slightly
+        // Convert to base64
+        const imageBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
         
         // Restore UI elements
-        originalControls.forEach(({ control, visible }) => {
-          control.style.display = visible ? '' : 'none';
-        });
-        
-        // Restore markers
-        markers.forEach(marker => {
-          marker.style.visibility = '';
+        controls.forEach(control => {
+          control.style.display = '';
         });
         
         resolve(imageBase64);
       }).catch(error => {
-        console.error("Error capturing map image:", error);
+        console.error("Error capturing map:", error);
         reject(error);
       });
     } catch (error) {
@@ -69,4 +48,8 @@ export const captureMapImage = (mapInstance) => {
       reject(error);
     }
   });
+};
+
+export default {
+  captureMapImage
 };
