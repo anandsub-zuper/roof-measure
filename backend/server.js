@@ -60,8 +60,24 @@ app.use((req, res, next) => {
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/maps', googleMapsRoutes);
 app.use('/api', apiRoutes);
-app.use('/api/metrics', require('./routes/metricsRoutes'));
-app.use('/api/roof', require('./routes/roofAnalysisRoutes'));
+
+try {
+  const metricsRoutes = require('./routes/metricsRoutes');
+  app.use('/api/metrics', metricsRoutes);
+  console.log('Metrics routes loaded successfully');
+} catch (error) {
+  console.error('Failed to load metrics routes:', error.message);
+  // Continue without crashing
+}
+
+try {
+  const roofAnalysisRoutes = require('./routes/roofAnalysisRoutes');
+  app.use('/api/roof', roofAnalysisRoutes);
+  console.log('Roof analysis routes loaded successfully');
+} catch (error) {
+  console.error('Failed to load roof analysis routes:', error.message);
+  // Continue without crashing
+}
 
 // Simple health check route
 app.get('/', (req, res) => {
