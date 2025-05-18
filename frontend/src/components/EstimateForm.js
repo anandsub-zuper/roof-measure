@@ -72,29 +72,31 @@ const EstimateForm = () => {
   }, []);
   
   // Special handling for address step - get coordinates and roof size
-  const getAddressDetails = useCallback(async () => {
+// Special handling for address step - get coordinates and roof size
+const getAddressDetails = useCallback(async () => {
   if (!formData.address) return;
-
-  performanceMonitor.start('getAddressDetails');
-
+  
+  // Set a timeout to prevent hanging
   const timeoutPromise = new Promise((_, reject) => {
     setTimeout(() => reject(new Error('Operation timed out')), 10000);
   });
   
   setIsLoading(true);
+  
   try {
     // Get coordinates from address
     console.log("Getting coordinates for address:", formData.address);
+    
+    // Wrap the geocoding API call with a race against the timeout
     const response = await Promise.race([
       apiService.getAddressCoordinates(formData.address),
       timeoutPromise
-       ]);
+    ]);
+    
     console.log("Geocoding API response:", response);
     
-    // Fixed: Check response structure and adapt to different possible formats
     if (response) {
       // Extract the actual data, handling different response structures
-      // Some APIs return {success: true, data: {...}} while others return the data directly
       const data = response.data || response;
       
       // Check if we have lat/lng in the response
@@ -111,30 +113,14 @@ const EstimateForm = () => {
         updateFormData('state', data.state || '');
         updateFormData('zipCode', data.zipCode || '');
         
-        console.log("Updated formData with coordinates:", { lat, lng });  
-
-        if (!isNaN(lat) && !isNaN(lng)) {
-        // Update form with coordinates and address components
-        updateFormData('lat', lat);
-        updateFormData('lng', lng);
-        updateFormData('city', data.city || '');
-        updateFormData('state', data.state || '');
-        updateFormData('zipCode', data.zipCode || '');
-        
         // Get roof size if coordinates are available
         try {
           console.log("Getting roof size for coordinates:", { lat, lng });
-          const roofSizeData = await apiService.getRoofSizeEstimate(lat, lng);
-          if (killSwitch.estimatedRoofSize) {
-            // Use a realistic estimate based on location
-            const estimatedSize = Math.floor(2500 + Math.random() * 1000);
-            updateFormData('roofSize', estimatedSize);
-            console.log("Using estimated roof size:", estimatedSize);
-          } else {
-            const roofSizeData = await Promise.race([
-              apiService.getRoofSizeEstimate(lat, lng),
-              timeoutPromise
-            ]);
+          const roofSizeData = await Promise.race([
+            apiService.getRoofSizeEstimate(lat, lng),
+            timeoutPromise
+          ]);
+          
           console.log("Roof size API response:", roofSizeData);
           
           if (roofSizeData) {
@@ -147,7 +133,7 @@ const EstimateForm = () => {
               updateFormData('roofSize', roofSize);
             } else {
               console.log("Invalid roof size, using default");
-              updateFormData('roofSize', 3000); // Default fallback size
+              updateFormData('roofSize', 3000);
             }
           } else {
             updateFormData('roofSize', 3000); // Default fallback size
@@ -173,11 +159,18 @@ const EstimateForm = () => {
       alert("Error processing address. Using default location data.");
     }
   } catch (error) {
-    console.error("Error processing address:", error);
-    // Use fallback coordinates for Sammamish, WA as default
+    console.error("Error in address processing:", error);
+    
+    // Handle timeout specifically
+    if (error.message === 'Operation timed out') {
+      console.warn("Operation timed out - using fallback data");
+    }
+    
+    // Use fallback values
     updateFormData('lat', 47.6162);
     updateFormData('lng', -122.0355);
     updateFormData('roofSize', 3000);
+    
     alert("There was an error processing your address. Using default location data.");
   } finally {
     setIsLoading(false);
