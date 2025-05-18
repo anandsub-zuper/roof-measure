@@ -83,38 +83,31 @@ const getAddressDetails = useCallback(async () => {
   
   // Set a timeout to prevent hanging
   const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('Operation timed out')), 10000);
+    setTimeout(() => reject(new Error('Operation timed out')), 15000);
   });
   
   setIsLoading(true);
   
   try {
-    // First check for cached address data to avoid API calls
-    const cachedData = apiService.getAddressCache?.(formData.address);
-    if (cachedData && cachedData.lat && cachedData.lng && cachedData.roofSize) {
-      console.log("Using cached address data:", cachedData);
+    // First get property data from Rentcast API
+    let propertyData = null;
+    try {
+      propertyData = await propertyDataService.getPropertyDetails(formData.address);
+      console.log("Retrieved property data:", propertyData);
       
-      // Use cached values for consistent experience
-      updateFormData('lat', cachedData.lat);
-      updateFormData('lng', cachedData.lng);
-      updateFormData('roofSize', cachedData.roofSize);
-      updateFormData('initialRoofSize', cachedData.roofSize); // Critical for consistency
-      
-      // Also use cached polygon if available
-      if (cachedData.roofPolygon) {
-        updateFormData('roofPolygon', cachedData.roofPolygon);
-      }
-      
-      setIsLoading(false);
-      return; // Skip API calls entirely
+      // Store property data in form state
+      updateFormData('propertyData', propertyData);
+    } catch (propertyError) {
+      console.error("Error fetching property data:", propertyError);
+      // Continue without property data - not critical
     }
     
-    // Get coordinates from address
+    // Get coordinates from address - pass property data if available
     console.log("Getting coordinates for address:", formData.address);
     
     // Wrap the geocoding API call with a race against the timeout
     const response = await Promise.race([
-      apiService.getAddressCoordinates(formData.address),
+      apiService.getAddressCoordinates(formData.address, propertyData),
       timeoutPromise
     ]);
     
@@ -138,11 +131,11 @@ const getAddressDetails = useCallback(async () => {
         updateFormData('state', data.state || '');
         updateFormData('zipCode', data.zipCode || '');
         
-        // Get roof size if coordinates are available
+        // Get roof size if coordinates are available - pass property data if available
         try {
           console.log("Getting roof size for coordinates:", { lat, lng });
           const roofSizeData = await Promise.race([
-            apiService.getRoofSizeEstimate(lat, lng),
+            apiService.getRoofSizeEstimate(lat, lng, propertyData),
             timeoutPromise
           ]);
           
@@ -151,47 +144,51 @@ const getAddressDetails = useCallback(async () => {
           if (roofSizeData) {
             // Extract size data, handling different response structures
             const sizeData = roofSizeData.data || roofSizeData;
-            const roofSize = parseInt(sizeData.size || 0, 10);
             
-            // Store the roof size for consistent experience
-            const addressKey = formData.address.replace(/[^a-zA-Z0-9]/g, '_');
-            
-            // Important: Cache the data for this address
-            if (apiService.saveAddressCache) {
-              apiService.saveAddressCache(formData.address, {
-                lat: lat,
-                lng: lng,
-                roofSize: roofSize,
-                roofPolygon: sizeData.roofPolygon
-              });
-            } else {
-              // Fallback if new cache function not available
-              localStorage.setItem(`roofSize_${addressKey}`, roofSize.toString());
+            // Check for building size from property data first (most accurate)
+            if (propertyData && propertyData.buildingSize) {
+              // Calculate roof size from building size data
+              const calculatedRoofSize = 
+                propertyPolygonGenerator.calculateRoofSizeFromBuildingSize(
+                  propertyData.buildingSize, 
+                  propertyData
+                );
               
-              // Also cache the lat/lng for reference
-              localStorage.setItem(`lat_${addressKey}`, lat.toString());
-              localStorage.setItem(`lng_${addressKey}`, lng.toString());
+              if (calculatedRoofSize) {
+                console.log("Using roof size calculated from property data:", calculatedRoofSize);
+                updateFormData('roofSize', calculatedRoofSize);
+                updateFormData('initialRoofSize', calculatedRoofSize);
+              } else {
+                // Fallback to API result
+                const roofSize = parseInt(sizeData.size || 0, 10);
+                if (!isNaN(roofSize) && roofSize > 0) {
+                  console.log("Setting roof size to:", roofSize);
+                  updateFormData('roofSize', roofSize);
+                  updateFormData('initialRoofSize', roofSize);
+                } else {
+                  console.log("Invalid roof size, using default");
+                  updateFormData('roofSize', 3000);
+                  updateFormData('initialRoofSize', 3000);
+                }
+              }
+            } else {
+              // Use API result if no property data
+              const roofSize = parseInt(sizeData.size || 0, 10);
+              if (!isNaN(roofSize) && roofSize > 0) {
+                console.log("Setting roof size to:", roofSize);
+                updateFormData('roofSize', roofSize);
+                updateFormData('initialRoofSize', roofSize);
+              } else {
+                console.log("Invalid roof size, using default");
+                updateFormData('roofSize', 3000);
+                updateFormData('initialRoofSize', 3000);
+              }
             }
             
             // Important: Also capture the roof polygon if available
             if (sizeData.roofPolygon && Array.isArray(sizeData.roofPolygon)) {
               console.log("Received roof polygon from API:", sizeData.roofPolygon);
               updateFormData('roofPolygon', sizeData.roofPolygon);
-              
-              // Also cache the polygon for consistency
-              if (!apiService.saveAddressCache) {
-                localStorage.setItem(`roofPolygon_${addressKey}`, JSON.stringify(sizeData.roofPolygon));
-              }
-            }
-            
-            if (!isNaN(roofSize) && roofSize > 0) {
-              console.log("Setting roof size to:", roofSize);
-              updateFormData('roofSize', roofSize);
-              updateFormData('initialRoofSize', roofSize); // Store the initial value for consistency
-            } else {
-              console.log("Invalid roof size, using default");
-              updateFormData('roofSize', 3000);
-              updateFormData('initialRoofSize', 3000); 
             }
           } else {
             updateFormData('roofSize', 3000);
