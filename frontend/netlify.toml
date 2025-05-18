@@ -1,18 +1,17 @@
-# netlify.toml - Updated with your actual API paths
-
-# Build configuration
+# netlify.toml
 [build]
-  command = "npm install html2canvas --save && npm run build"
+  command = "npm run build"
   publish = "build"
 
 # Build environment variables
 [build.environment]
+  # This tells create-react-app to ignore linting during build
   CI = "false"
 
-# Redirect API requests to your Heroku backend
+# Redirect API requests to your backend server
 [[redirects]]
-  from = "/api/maps/*"
-  to = "https://roof-measure-5164a9a88417.herokuapp.com/api/maps/:splat"
+  from = "/api/*"
+  to = "https://roof-measure-5164a9a88417.herokuapp.com/api/:splat"
   status = 200
   force = true
 
