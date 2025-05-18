@@ -1,10 +1,10 @@
-// frontend/src/services/openAIService.js - Fix for post method error
+// frontend/src/services/openAIService.js - Updated with your actual API paths
 
 /**
  * Client-side service for OpenAI-related functionality
  * This makes API calls to your backend, which then uses OpenAI
  */
-import axios from 'axios'; // Direct import axios instead of relying on apiService
+import axios from 'axios';
 
 /**
  * Generate a roof estimate based on form data
@@ -13,7 +13,8 @@ import axios from 'axios'; // Direct import axios instead of relying on apiServi
  */
 export const generateEstimate = async (formData) => {
   try {
-    // Call your existing endpoint
+    // Call our backend API, not OpenAI directly
+    // This might need adjustment based on your actual endpoint
     const response = await axios.post('/api/estimate', formData);
     return response.data;
   } catch (error) {
@@ -23,23 +24,25 @@ export const generateEstimate = async (formData) => {
 };
 
 /**
- * Analyze roof image to detect roof boundaries using OpenAI Vision
- * @param {string} imageBase64 - Base64 encoded image of the roof from satellite view
- * @returns {Promise<Array>} - Resolves with array of coordinates forming the roof polygon
+ * Analyze roof image to detect roof boundaries
+ * @param {string} address - The address for the roof
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {Promise<Object>} - Resolves with roof data including size and polygon
  */
-export const analyzeRoofImage = async (imageBase64) => {
+export const analyzeRoof = async (address, lat, lng) => {
   try {
-    // Direct axios call instead of using apiService
-    const response = await axios.post('/api/analyze-roof', {
-      image: imageBase64
+    // Use your actual roof-size endpoint
+    const response = await axios.post('/api/maps/roof-size', {
+      address,
+      lat, 
+      lng
     });
     
-    // Return the coordinates from the response
-    return response.data.coordinates;
+    return response.data;
   } catch (error) {
-    console.error('Error analyzing roof image:', error);
-    // Return null instead of throwing to avoid breaking the application
-    // This will trigger the fallback method
+    console.error('Error analyzing roof:', error);
+    // Return null to trigger fallback mechanisms
     return null;
   }
 };
@@ -51,7 +54,7 @@ export const analyzeRoofImage = async (imageBase64) => {
  */
 export const askRoofingQuestion = async (question) => {
   try {
-    // Direct axios call
+    // This might need adjustment based on your actual endpoint
     const response = await axios.post('/api/ask', { question });
     return response.data;
   } catch (error) {
@@ -63,5 +66,5 @@ export const askRoofingQuestion = async (question) => {
 export default {
   generateEstimate,
   askRoofingQuestion,
-  analyzeRoofImage
+  analyzeRoof
 };
