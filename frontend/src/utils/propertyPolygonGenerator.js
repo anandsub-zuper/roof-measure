@@ -1,4 +1,5 @@
-// src/utils/propertyPolygonGenerator.js
+// Enhanced polygon generation utility with better scaling
+// Replace your frontend/src/utils/propertyPolygonGenerator.js with this improved version
 
 /**
  * Property-specific polygon generation utility
@@ -17,7 +18,7 @@ export const generatePropertyPolygon = (lat, lng, size, propertyData = null) => 
   // Always validate inputs first
   if (!lat || !lng || !size) {
     console.warn("Invalid inputs for polygon generation");
-    return generateSimplePolygon(lat, lng, 2500, 1.8);
+    return generateSimplePolygon(lat, lng, 2500, 0.5); // Using smaller scale factor
   }
   
   // If we have property data, use it for better polygon generation
@@ -56,42 +57,40 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
     isStorage: buildingType.toLowerCase().includes('storage')
   };
   
-  // Calculate basic size metrics
+  // Calculate basic size metrics - FIXED: use much smaller scale factor
   const sqMeters = size * 0.092903;
   
   // Define building-specific scaling factors
-  let scaleFactor = 1.8; // Default
+  // FIXED: Reduced scale factors significantly to match visual representation
+  let scaleFactor = 0.4; // Default - reduced from 1.8
   let aspectRatio = 1.5; // Default
   
   // Adjust scaling based on building type
   if (typeInfo.isSingleFamily) {
     // Single family homes
-    scaleFactor = 1.8;
+    scaleFactor = 0.4; // Reduced from 1.8
     aspectRatio = 1.4;
   } else if (typeInfo.isTownhouse) {
     // Townhouses are narrower and longer
-    scaleFactor = 1.75;
+    scaleFactor = 0.35; // Reduced from 1.75
     aspectRatio = 2.2;
   } else if (typeInfo.isMultiFamily || typeInfo.isApartment) {
     // Multi-family buildings often have complex shapes
-    // Use a slightly larger scale factor
-    scaleFactor = 1.9;
+    scaleFactor = 0.45; // Reduced from 1.9
     aspectRatio = 1.6;
   } else if (typeInfo.isCommercial || typeInfo.isIndustrial) {
     // Commercial buildings tend to be larger and more square
-    scaleFactor = 1.6;
+    scaleFactor = 0.35; // Reduced from 1.6
     aspectRatio = 1.2;
   } else if (typeInfo.isWarehouse || typeInfo.isStorage) {
     // Warehouses are very rectangular
-    scaleFactor = 1.5;
+    scaleFactor = 0.3; // Reduced from 1.5
     aspectRatio = 2.5;
   }
   
   // Adjust for multi-story buildings
-  // Typically, higher buildings have smaller footprints relative to total square footage
   if (stories > 1) {
     // Reduce the size per story, but not linearly
-    // A 3-story building doesn't have 1/3 the footprint
     const adjustedSize = size / Math.sqrt(stories);
     // Recalculate square meters with story adjustment
     const adjustedSqMeters = adjustedSize * 0.092903 * scaleFactor;
@@ -143,7 +142,7 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
   // Create complex polygons for certain building types
   if ((typeInfo.isMultiFamily || typeInfo.isApartment) && size > 3000) {
     // Multi-family large buildings often have L shapes
-    // Use a deterministic approach to decide shape orientation based on coordinates
+    // Use a deterministic approach based on coordinates
     const orientation = Math.round((lat * 1000 + lng * 1000) % 4);
     
     switch(orientation) {
@@ -227,18 +226,18 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
   // Size to square meters
   const sqMeters = size * 0.092903;
   
-  // Apply a scale factor for visual representation
-  let scaleFactor = 1.8; // Default
+  // FIXED: Apply a much smaller scale factor for visual representation
+  let scaleFactor = 0.4; // Reduced from 1.8
   
   // Adjust scaling based on size categories 
   if (size < 1200) {
-    scaleFactor = 2.0; // Small buildings need more relative scaling
+    scaleFactor = 0.45; // Reduced from 2.0
   } else if (size >= 1200 && size < 3000) {
-    scaleFactor = 1.9; // Medium buildings
+    scaleFactor = 0.42; // Reduced from 1.9
   } else if (size >= 3000 && size < 5000) {
-    scaleFactor = 1.8; // Large buildings
+    scaleFactor = 0.4; // Reduced from 1.8
   } else {
-    scaleFactor = 1.7; // Very large buildings
+    scaleFactor = 0.38; // Reduced from 1.7
   }
   
   const adjustedSqMeters = sqMeters * scaleFactor;
@@ -285,7 +284,7 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
  * @param {number} scaleFactor - Scaling factor
  * @returns {Array} - Polygon coordinates
  */
-export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 1.8) => {
+export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 0.4) => {
   // Convert to square meters
   const sqMeters = size * 0.092903;
   
@@ -362,9 +361,97 @@ export const calculateRoofSizeFromBuildingSize = (buildingSize, propertyData) =>
   return Math.round(footprint * roofFactor);
 };
 
+/**
+ * Fix the backend-provided polygon coordinates to display properly
+ * @param {Array} polygonCoords - Original polygon coordinates from backend
+ * @param {number} lat - Center latitude 
+ * @param {number} lng - Center longitude
+ * @param {number} size - Target roof size in sq ft
+ * @returns {Array} - Fixed polygon coordinates
+ */
+export const fixProvidedPolygon = (polygonCoords, lat, lng, size) => {
+  if (!polygonCoords || !Array.isArray(polygonCoords) || polygonCoords.length < 3) {
+    return generateSizeBasedPolygon(lat, lng, size);
+  }
+  
+  // Check if the coordinates need resizing
+  try {
+    // Calculate area of provided polygon
+    const areaInSqMeters = calculatePolygonAreaInSquareMeters(polygonCoords);
+    const areaInSqFeet = areaInSqMeters * 10.7639;
+    
+    console.log("Original polygon area:", areaInSqFeet, "sq ft");
+    
+    // If the area is reasonably close to the expected size, use as is
+    if (areaInSqFeet > size * 0.5 && areaInSqFeet < size * 1.5) {
+      return polygonCoords;
+    }
+    
+    // Otherwise, we need to resize the polygon
+    // Calculate the scale factor needed
+    const scaleFactor = Math.sqrt(size / areaInSqFeet);
+    console.log("Applied scale factor:", scaleFactor);
+    
+    // Compute the centroid
+    const centroid = calculateCentroid(polygonCoords);
+    
+    // Resize the polygon around its centroid
+    return polygonCoords.map(point => {
+      const dLat = point.lat - centroid.lat;
+      const dLng = point.lng - centroid.lng;
+      
+      return {
+        lat: centroid.lat + dLat * scaleFactor,
+        lng: centroid.lng + dLng * scaleFactor
+      };
+    });
+  } catch (error) {
+    console.error("Error fixing polygon:", error);
+    return generateSizeBasedPolygon(lat, lng, size);
+  }
+};
+
+// Helper to calculate area using shoelace formula
+const calculatePolygonAreaInSquareMeters = (polygonCoords) => {
+  // Convert lat/lng to meters with Mercator projection
+  const earthRadius = 6378137; // meters
+  const pointsInMeters = polygonCoords.map(point => {
+    const x = point.lng * (Math.PI / 180) * earthRadius;
+    const y = Math.log(Math.tan((Math.PI / 4) + (point.lat * (Math.PI / 180) / 2))) * earthRadius;
+    return { x, y };
+  });
+  
+  // Apply shoelace formula
+  let area = 0;
+  for (let i = 0; i < pointsInMeters.length; i++) {
+    const j = (i + 1) % pointsInMeters.length;
+    area += pointsInMeters[i].x * pointsInMeters[j].y;
+    area -= pointsInMeters[j].x * pointsInMeters[i].y;
+  }
+  
+  return Math.abs(area / 2);
+};
+
+// Helper to calculate centroid of a polygon
+const calculateCentroid = (polygonCoords) => {
+  let latSum = 0;
+  let lngSum = 0;
+  
+  polygonCoords.forEach(point => {
+    latSum += point.lat;
+    lngSum += point.lng;
+  });
+  
+  return {
+    lat: latSum / polygonCoords.length,
+    lng: lngSum / polygonCoords.length
+  };
+};
+
 export default {
   generatePropertyPolygon,
   generateSizeBasedPolygon,
   generateSimplePolygon,
-  calculateRoofSizeFromBuildingSize
+  calculateRoofSizeFromBuildingSize,
+  fixProvidedPolygon
 };
