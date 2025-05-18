@@ -113,6 +113,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     console.log("Polygon created with area:", area);
     
     if (formData.roofSizeAuto) {
+      const initialSize = formData.initialRoofSize || formData.roofSize;
+      const percentDiff = Math.abs(area - initialSize) / initialSize;
       const areaValue = area || formData.roofSize || 2500;
       console.log("Updating roof size to:", areaValue);
       setLocalRoofSize(areaValue);
@@ -122,6 +124,15 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     if (performanceMonitor && performanceMonitor.end) {
       performanceMonitor.end('polygonAreaCalc');
     }
+    if (percentDiff > 0.15) {
+      console.log("Polygon area differs significantly from API value, keeping API value");
+      // Preserve the backend measurement as it's likely more accurate
+    } else {
+      // The measurements are close enough, so we can use the polygon area
+      console.log("Updating roof size to match polygon area:", area);
+      updateFormData('roofSize', area);
+    }
+  }
   }, [formData.roofSize, formData.roofSizeAuto, debouncedUpdateRoofSize]);
 
   // Toggle automatic/manual size - optimized with useCallback
@@ -227,6 +238,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         lng={coordinates.lng}
         address={formData.address}
         roofSize={formData.roofSize} // CRITICAL: Pass the backend roof size
+        roofPolygon={formData.roofPolygon} // Pass the polygon coordinates from backend
         onMapReady={handleMapReady}
         onMapError={handleMapError}
         onPolygonCreated={handlePolygonCreated}
