@@ -71,75 +71,89 @@ const EstimateForm = () => {
   
   // Special handling for address step - get coordinates and roof size
   const getAddressDetails = useCallback(async () => {
-    if (!formData.address) return;
+  if (!formData.address) return;
+  
+  setIsLoading(true);
+  try {
+    // Get coordinates from address
+    console.log("Getting coordinates for address:", formData.address);
+    const response = await apiService.getAddressCoordinates(formData.address);
+    console.log("Geocoding API response:", response);
     
-    setIsLoading(true);
-    try {
-      // Get coordinates from address
-      const response = await apiService.getAddressCoordinates(formData.address);
-      console.log("Geocoding API response:", response);
+    // Fixed: Check response structure and adapt to different possible formats
+    if (response) {
+      // Extract the actual data, handling different response structures
+      // Some APIs return {success: true, data: {...}} while others return the data directly
+      const data = response.data || response;
       
-      // Fixed: Check response structure and adapt to different possible formats
-      if (response) {
-        // Extract the actual data, handling different response structures
-        // Some APIs return {success: true, data: {...}} while others return the data directly
-        const data = response.data || response;
+      // Check if we have lat/lng in the response
+      const lat = parseFloat(data.lat);
+      const lng = parseFloat(data.lng);
+      
+      console.log("Extracted coordinates:", { lat, lng });
+      
+      if (!isNaN(lat) && !isNaN(lng)) {
+        // Update form with coordinates and address components
+        updateFormData('lat', lat);
+        updateFormData('lng', lng);
+        updateFormData('city', data.city || '');
+        updateFormData('state', data.state || '');
+        updateFormData('zipCode', data.zipCode || '');
         
-        // Check if we have lat/lng in the response
-        const lat = parseFloat(data.lat);
-        const lng = parseFloat(data.lng);
+        console.log("Updated formData with coordinates:", { lat, lng });
         
-        console.log("Extracted coordinates:", { lat, lng });
-        
-        if (!isNaN(lat) && !isNaN(lng)) {
-          // Update form with coordinates and address components
-          updateFormData('lat', lat);
-          updateFormData('lng', lng);
-          updateFormData('city', data.city || '');
-          updateFormData('state', data.state || '');
-          updateFormData('zipCode', data.zipCode || '');
+        // Get roof size if coordinates are available
+        try {
+          console.log("Getting roof size for coordinates:", { lat, lng });
+          const roofSizeData = await apiService.getRoofSizeEstimate(lat, lng);
+          console.log("Roof size API response:", roofSizeData);
           
-          console.log("Updated formData with coordinates:", { lat, lng });
-          
-          // Get roof size if coordinates are available
-          try {
-            const roofSizeData = await apiService.getRoofSizeEstimate(lat, lng);
-            console.log("Roof size API response:", roofSizeData);
+          if (roofSizeData) {
+            // Extract size data, handling different response structures
+            const sizeData = roofSizeData.data || roofSizeData;
+            const roofSize = parseInt(sizeData.size || 0, 10);
             
-            if (roofSizeData) {
-              // Extract size data, handling different response structures
-              const sizeData = roofSizeData.data || roofSizeData;
-              const roofSize = parseInt(sizeData.size || 0, 10);
-              
-              if (!isNaN(roofSize) && roofSize > 0) {
-                console.log("Setting roof size to:", roofSize);
-                updateFormData('roofSize', roofSize);
-              } else {
-                console.log("Invalid roof size, using default");
-                updateFormData('roofSize', 3000); // Default fallback size
-              }
+            if (!isNaN(roofSize) && roofSize > 0) {
+              console.log("Setting roof size to:", roofSize);
+              updateFormData('roofSize', roofSize);
             } else {
+              console.log("Invalid roof size, using default");
               updateFormData('roofSize', 3000); // Default fallback size
             }
-          } catch (sizeError) {
-            console.error("Error getting roof size:", sizeError);
+          } else {
             updateFormData('roofSize', 3000); // Default fallback size
           }
-        } else {
-          console.error("Invalid coordinates in response:", { lat, lng });
-          alert("Could not determine the location coordinates. Please try a different address.");
+        } catch (sizeError) {
+          console.error("Error getting roof size:", sizeError);
+          updateFormData('roofSize', 3000); // Default fallback size
         }
       } else {
-        console.error("Invalid geocoding response format");
-        alert("Error processing address. Please try again.");
+        console.error("Invalid coordinates in response:", { lat, lng });
+        // Use fallback coordinates for Sammamish, WA as default
+        updateFormData('lat', 47.6162);
+        updateFormData('lng', -122.0355);
+        updateFormData('roofSize', 3000);
+        alert("Could not determine the exact location coordinates. Using approximate location.");
       }
-    } catch (error) {
-      console.error("Error processing address:", error);
-      alert("There was an error processing your address. Please try again.");
-    } finally {
-      setIsLoading(false);
+    } else {
+      console.error("Invalid geocoding response format");
+      // Use fallback coordinates for Sammamish, WA as default
+      updateFormData('lat', 47.6162);
+      updateFormData('lng', -122.0355);
+      updateFormData('roofSize', 3000);
+      alert("Error processing address. Using default location data.");
     }
-  }, [formData.address, updateFormData]);
+  } catch (error) {
+    console.error("Error processing address:", error);
+    // Use fallback coordinates for Sammamish, WA as default
+    updateFormData('lat', 47.6162);
+    updateFormData('lng', -122.0355);
+    updateFormData('roofSize', 3000);
+    alert("There was an error processing your address. Using default location data.");
+  } finally {
+    setIsLoading(false);
+  }
+}, [formData.address, updateFormData]);
   
   // Generate estimate
   const generateEstimate = useCallback(async () => {
@@ -163,20 +177,37 @@ const EstimateForm = () => {
     }
   }, [formData]);
   
-  // Navigate to next step
-  const nextStep = useCallback(async () => {
+const nextStep = useCallback(async () => {
+  try {
+    // Add a timeout for any async operations to ensure we don't freeze
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Operation timed out")), 20000)
+    );
+    
     // Special handling for certain steps
     if (currentStep === 0) {
       // Address step - get coordinates and roof size
-      await getAddressDetails();
+      await Promise.race([getAddressDetails(), timeoutPromise]);
     } else if (currentStep === 7) {
       // Financing step - generate estimate
-      await generateEstimate();
+      await Promise.race([generateEstimate(), timeoutPromise]);
     }
     
     // Proceed to next step
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
-  }, [currentStep, getAddressDetails, generateEstimate, steps.length]);
+  } catch (error) {
+    console.error("Error in nextStep:", error);
+    
+    // Handle specific errors
+    if (error.message === "Operation timed out") {
+      alert("The operation took too long to complete. Please try again.");
+    } else {
+      alert("There was an error processing your request. Please try again.");
+    }
+    
+    setIsLoading(false);
+  }
+}, [currentStep, getAddressDetails, generateEstimate, steps.length]);
   
   // Navigate to previous step
   const prevStep = useCallback(() => {
