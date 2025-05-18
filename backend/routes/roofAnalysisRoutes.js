@@ -2,11 +2,12 @@
 const express = require('express');
 const router = express.Router();
 const { logInfo, logError } = require('../utils/logger');
+const openAIVisionService = require('../services/openAIVisionService');
 
 /**
- * Simple placeholder for roof analysis
+ * Analyze roof using OpenAI Vision
  */
-router.post('/analyze', (req, res) => {
+router.post('/analyze', async (req, res) => {
   try {
     const { lat, lng, propertyData } = req.body;
     
@@ -16,60 +17,98 @@ router.post('/analyze', (req, res) => {
       hasPropertyData: !!propertyData 
     });
     
-    // For now, just return a simple response using existing roof size endpoint data
-    const roofSize = 2576; // Default from our existing endpoint
+    // Input validation
+    if (!lat || !lng) {
+      return res.status(400).json({
+        success: false,
+        message: 'Latitude and longitude are required'
+      });
+    }
     
-    // Generate a simple polygon for visualization
-    const center = { lat, lng };
-    const roofPolygon = generateSimpleRoofPolygon(lat, lng, roofSize);
-    
-    res.status(200).json({
-      success: true,
-      roofArea: roofSize,
-      confidence: "medium",
-      roofShape: "simple",
-      roofPolygon: roofPolygon,
-      estimatedPitch: "moderate",
-      method: "simplified_analysis",
-      notes: "OpenAI Vision analysis not yet implemented."
-    });
+    // Try OpenAI Vision analysis first
+    try {
+      const analysisResult = await openAIVisionService.analyzeRoof(
+        parseFloat(lat), 
+        parseFloat(lng), 
+        propertyData
+      );
+      
+      logInfo('OpenAI Vision analysis completed', { 
+        confidence: analysisResult.confidence,
+        roofArea: analysisResult.roofArea
+      });
+      
+      // If confidence is high or medium, return the vision result
+      if (analysisResult.confidence === "high" || analysisResult.confidence === "medium") {
+        return res.json({
+          success: true,
+          data: analysisResult
+        });
+      }
+      
+      // If confidence is low, try property-based calculation
+      logInfo('Vision analysis has low confidence, trying property-based calculation');
+      
+      if (propertyData && propertyData.buildingSize) {
+        const propertyBasedResult = openAIVisionService.calculateRoofSizeFromProperty(
+          propertyData, 
+          parseFloat(lat), 
+          parseFloat(lng)
+        );
+        
+        if (propertyBasedResult) {
+          logInfo('Property-based calculation completed', { 
+            roofArea: propertyBasedResult.roofArea 
+          });
+          
+          // Return both results, but recommend the property-based one
+          return res.json({
+            success: true,
+            data: {
+              visionAnalysis: analysisResult,
+              propertyBasedCalculation: propertyBasedResult,
+              recommended: propertyBasedResult
+            }
+          });
+        }
+      }
+      
+      // If property-based calculation failed or wasn't possible, return vision result anyway
+      return res.json({
+        success: true,
+        data: analysisResult
+      });
+    } catch (visionError) {
+      logError('OpenAI Vision analysis failed', { error: visionError.message });
+      
+      // Try property-based calculation as fallback
+      if (propertyData && propertyData.buildingSize) {
+        const propertyBasedResult = openAIVisionService.calculateRoofSizeFromProperty(
+          propertyData, 
+          parseFloat(lat), 
+          parseFloat(lng)
+        );
+        
+        if (propertyBasedResult) {
+          logInfo('Fallback to property-based calculation successful');
+          return res.json({
+            success: true,
+            data: propertyBasedResult
+          });
+        }
+      }
+      
+      // If all else fails, return error
+      throw visionError;
+    }
   } catch (error) {
-    logError('Error in roof analysis:', error);
-    res.status(500).json({ 
-      success: false, 
+    logError('Roof analysis error', { error: error.message });
+    return res.status(500).json({
+      success: false,
       message: 'Error analyzing roof',
       error: error.message
     });
   }
 });
-
-/**
- * Generate a simple rectangular roof polygon
- */
-function generateSimpleRoofPolygon(lat, lng, size = 2500) {
-  // Calculate dimensions based on a typical aspect ratio
-  const aspectRatio = 1.5; // Length:Width ratio
-  const totalAreaMeters = size / 10.7639; // Convert sq ft to sq meters
-  
-  // Calculate dimensions
-  const width = Math.sqrt(totalAreaMeters / aspectRatio);
-  const length = width * aspectRatio;
-  
-  // Convert to degrees
-  const metersPerDegreeLat = 111319.9; // at equator
-  const latRadians = lat * (Math.PI / 180);
-  const metersPerDegreeLng = metersPerDegreeLat * Math.cos(latRadians);
-  
-  const latOffset = (length / 2) / metersPerDegreeLat;
-  const lngOffset = (width / 2) / metersPerDegreeLng;
-  
-  // Create rectangle
-  return [
-    { lat: lat - latOffset, lng: lng - lngOffset },
-    { lat: lat - latOffset, lng: lng + lngOffset },
-    { lat: lat + latOffset, lng: lng + lngOffset },
-    { lat: lat + latOffset, lng: lng - lngOffset }
-  ];
-}
 
 module.exports = router;
