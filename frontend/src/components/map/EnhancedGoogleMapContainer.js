@@ -1,16 +1,17 @@
-// src/components/map/EnhancedGoogleMapContainer.js - Final version
+// Fix for EnhancedGoogleMapContainer.js polygon scaling issue
+// In your frontend/src/components/map/EnhancedGoogleMapContainer.js
 
 import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import config from '../../config';
 import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
 
-const EnhancedGoogleMapContainer = forwardRef(({ 
+const FixedGoogleMapContainer = forwardRef(({ 
   lat, 
   lng, 
   address, 
   roofSize,
   roofPolygon,
-  propertyData, // New prop to receive property data
+  propertyData,
   enableDrawing = false,
   onMapReady, 
   onMapError, 
@@ -23,8 +24,9 @@ const EnhancedGoogleMapContainer = forwardRef(({
   const [errorMessage, setErrorMessage] = useState(null);
   const [loadingTimeout, setLoadingTimeout] = useState(null);
   
-  console.log("EnhancedGoogleMapContainer rendering with props:", { 
+  console.log("FixedGoogleMapContainer rendering with props:", { 
     lat, lng, address, roofSize,
+    hasRoofPolygon: !!roofPolygon,
     hasPropertyData: !!propertyData,
     propertyType: propertyData?.propertyType
   });
@@ -98,10 +100,18 @@ const EnhancedGoogleMapContainer = forwardRef(({
   
   // Function to create accurate polygon based on roof size or provided coords
   const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
-    // If we have polygon coordinates from the backend, use them
+    // If we have polygon coordinates from the backend, use them but FIX THEM
     if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
-      console.log("Using provided roof polygon coordinates");
-      return providedPolygon;
+      console.log("Using provided roof polygon coordinates WITH FIXES");
+      
+      // NEW: Fix the provided polygon if needed
+      // This uses our new utility function to fix the scale
+      return propertyPolygonGenerator.fixProvidedPolygon(
+        providedPolygon,
+        validLat,
+        validLng,
+        size
+      );
     }
     
     // Use property data for better polygon generation (use passed data or component prop)
@@ -171,21 +181,21 @@ const EnhancedGoogleMapContainer = forwardRef(({
       const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
       // Convert to square feet (1 sq meter = 10.7639 sq feet)
       
-      // IMPORTANT: Adjust for visual scaling to get actual roof size
-      // Get appropriate scale factor based on property data if available
-      let scaleFactor = 1.8; // Default
+      // FIXED: Reduced the scale factor to avoid over-correction
+      let scaleFactor = 0.4;
       
       if (dataToUse) {
         // Get building-specific scale factor
         const buildingSize = dataToUse.buildingSize || roofSize;
-        if (buildingSize < 1200) scaleFactor = 2.0;
-        else if (buildingSize < 3000) scaleFactor = 1.9;
-        else if (buildingSize < 5000) scaleFactor = 1.8;
-        else scaleFactor = 1.7;
+        if (buildingSize < 1200) scaleFactor = 0.45;
+        else if (buildingSize < 3000) scaleFactor = 0.42;
+        else if (buildingSize < 5000) scaleFactor = 0.4;
+        else scaleFactor = 0.38;
       }
       
       // Apply reverse scaling to match actual building footprint
-      const areaInSquareFeet = Math.round((areaInSquareMeters * 10.7639) / scaleFactor);
+      // FIXED: Removed the scaling correction since we're now scaling the polygon directly
+      const areaInSquareFeet = Math.round(areaInSquareMeters * 10.7639);
       
       console.log("Calculated polygon area:", areaInSquareFeet, "sq ft");
       
@@ -324,6 +334,9 @@ const EnhancedGoogleMapContainer = forwardRef(({
           
           // Create polygon using roof coordinates or estimate
           const polygonCoords = createRoofPolygon(validLat, validLng, roofSize, roofPolygon);
+          
+          // FIXED: Debug the polygon coordinates
+          console.log("Generated polygon coordinates:", JSON.stringify(polygonCoords));
           
           // Create the polygon on the map
           const polygon = new window.google.maps.Polygon({
@@ -502,6 +515,6 @@ const EnhancedGoogleMapContainer = forwardRef(({
   );
 });
 
-EnhancedGoogleMapContainer.displayName = 'EnhancedGoogleMapContainer';
+FixedGoogleMapContainer.displayName = 'FixedGoogleMapContainer';
 
-export default EnhancedGoogleMapContainer;
+export default FixedGoogleMapContainer;
