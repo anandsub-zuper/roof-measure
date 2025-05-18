@@ -140,41 +140,32 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           Debug Environment
         </button>
       )}
-      
-      {/* Map Container with Satellite View */}
-      <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
-        {hasValidCoordinates() && !skipMap && !mapDisabled ? (
-          <GoogleMapContainer
-            ref={mapContainerRef}
-            lat={formData.lat}
-            lng={formData.lng}
-            address={formData.address}
-            onMapReady={handleMapReady}
-            onMapError={handleMapError}
-            onPolygonCreated={handlePolygonCreated}
-          />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
-            <Camera size={40} className="mb-2 text-gray-400" />
-            {skipMap || mapDisabled ? (
-              <>
-                <p className="text-gray-500">
-                  {mapDisabled ? "Map view disabled" : "Map view skipped"}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Using estimated roof size
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-gray-500">No coordinates available</p>
-                <p className="text-xs text-gray-400 mt-2">
-                  {JSON.stringify({lat: formData.lat, lng: formData.lng})}
-                </p>
-              </>
-            )}
-          </div>
-        )}
+    <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
+  {hasValidCoordinates() && !skipMap && !mapDisabled && !killSwitch.googleMaps ? (
+    <GoogleMapContainer
+      ref={mapContainerRef}
+      lat={formData.lat}
+      lng={formData.lng}
+      address={formData.address}
+      onMapReady={handleMapReady}
+      onMapError={handleMapError}
+      onPolygonCreated={handlePolygonCreated}
+    />
+  ) : hasValidCoordinates() ? (
+    <DummyMapContainer
+      ref={mapContainerRef}
+      lat={parseFloat(formData.lat)}
+      lng={parseFloat(formData.lng)}
+      address={formData.address}
+      onMapReady={handleMapReady}
+      onPolygonCreated={handlePolygonCreated}
+    />
+  ) : (
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
+      <Camera size={40} className="mb-2 text-gray-400" />
+      <p className="text-gray-500">No coordinates available</p>
+    </div>
+  )}
         
         {/* Loading overlay */}
         {hasValidCoordinates() && loading && !error && !skipMap && !mapDisabled && (
