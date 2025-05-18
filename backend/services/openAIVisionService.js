@@ -1,102 +1,150 @@
-// backend/services/openAIVisionService.js
+// backend/services/openAIVisionService.js - Updated version
+
 const { OpenAI } = require('openai');
 const axios = require('axios');
+const { logInfo, logError } = require('../utils/logger');
 
+// Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 /**
- * Get satellite imagery for a location
+ * Analyze roof using OpenAI Vision
  */
-const getSatelliteImage = async (lat, lng) => {
-  const zoom = 20; // High zoom level for detailed view
-  const size = "640x640"; // Large image for better analysis
-  const mapType = "satellite";
-  const scale = 2; // Higher resolution
-  
-  const imageUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${size}&scale=${scale}&maptype=${mapType}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-  
+exports.analyzeRoof = async (lat, lng, propertyData = null) => {
   try {
-    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    return Buffer.from(response.data, 'binary').toString('base64');
+    logInfo('Starting roof analysis with OpenAI Vision', { lat, lng });
+    
+    // Get the best satellite image
+    const { imageBase64, analysis } = await getOptimalSatelliteImage(lat, lng, propertyData);
+    
+    return {
+      success: true,
+      ...analysis,
+      method: "openai_vision"
+    };
   } catch (error) {
-    console.error("Error fetching satellite image:", error);
+    logError('Error in OpenAI Vision roof analysis', { error: error.message });
     throw error;
   }
 };
 
 /**
- * Analyze a roof using OpenAI Vision
+ * Get the optimal satellite image and analysis
  */
-const analyzeRoof = async (lat, lng, propertyData) => {
-  try {
-    console.log("🔍 VISION: Starting roof analysis for coordinates:", lat, lng);
-    console.log("🔍 VISION: Property data provided:", !!propertyData);
-    
-    // Get satellite image
-    const imageBase64 = await getSatelliteImage(lat, lng);
-    console.log("🔍 VISION: Satellite image fetched successfully");
-    
-    return await analyzeRoofFromImage(imageBase64, propertyData, lat, lng);
-  } catch (error) {
-    console.error("🔍 VISION: Error in roof analysis:", error);
-    throw error;
-  }
-};
-
-/**
- * Process the satellite image with OpenAI Vision
- */
-const analyzeRoofFromImage = async (imageBase64, propertyData, lat, lng) => {
-  try {
-    // Prepare property information string
-    let propertyInfo = "No property data available.";
-    
-    if (propertyData) {
-      propertyInfo = `This property has ${propertyData.buildingSize || 'unknown'} square feet total ` +
-        `with ${propertyData.stories || 1} stories, and is a ${propertyData.propertyType || 'residential'} building. ` +
-        `${propertyData.yearBuilt ? `It was built in ${propertyData.yearBuilt}.` : ''}`;
+const getOptimalSatelliteImage = async (lat, lng, propertyData) => {
+  // Try different zoom levels
+  const zoomLevels = [20, 19, 21]; // Try zoom 20 first, then 19, then 21
+  const results = [];
+  
+  for (const zoom of zoomLevels) {
+    try {
+      const imageUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}`+
+        `&zoom=${zoom}&size=640x640&scale=2&maptype=satellite`+
+        `&format=png&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+        
+      const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+      const imageBase64 = Buffer.from(response.data, 'binary').toString('base64');
+      
+      // Analyze with OpenAI
+      const analysis = await analyzeImageWithOpenAI(imageBase64, lat, lng, propertyData);
+      
+      logInfo(`Analysis at zoom level ${zoom}`, { 
+        confidence: analysis.confidence,
+        roofArea: analysis.roofArea
+      });
+      
+      results.push({
+        zoom,
+        imageBase64,
+        analysis,
+        confidence: confidenceToNumber(analysis.confidence)
+      });
+      
+      // If we get high confidence, return immediately
+      if (analysis.confidence === 'high') {
+        logInfo(`Found high confidence result at zoom level ${zoom}`);
+        return { imageBase64, analysis };
+      }
+    } catch (error) {
+      logError(`Error with zoom level ${zoom}`, { error: error.message });
     }
+  }
+  
+  // Sort by confidence and return the best one
+  results.sort((a, b) => b.confidence - a.confidence);
+  
+  if (results.length > 0) {
+    const best = results[0];
+    logInfo(`Using best result from zoom level ${best.zoom} with confidence ${best.analysis.confidence}`);
+    return { imageBase64: best.imageBase64, analysis: best.analysis };
+  }
+  
+  // If all zoom levels failed, return a low confidence result
+  return {
+    imageBase64: '',
+    analysis: {
+      roofArea: 0,
+      confidence: "low",
+      roofShape: "unknown",
+      roofPolygon: [],
+      estimatedPitch: "unknown",
+      notes: "Could not obtain good satellite imagery for analysis"
+    }
+  };
+};
+
+/**
+ * Analyze image with OpenAI Vision
+ */
+const analyzeImageWithOpenAI = async (imageBase64, lat, lng, propertyData) => {
+  try {
+    // Format property info for the prompt
+    const propertyInfo = propertyData ? 
+      `This is a ${propertyData.propertyType} property with ${propertyData.buildingSize} square feet and ${propertyData.stories || 1} stories.` : 
+      'No property information is available.';
     
-    console.log("🔍 VISION: Sending to OpenAI with property info:", propertyInfo);
-    
-    // Call OpenAI Vision API
+    // Create the OpenAI request
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert roof measurement specialist. Analyze the satellite imagery to identify and measure the main building's roof. The image is centered at coordinates: ${lat}, ${lng}.`
+          content: `You are an expert in roof analysis from satellite imagery. Your task is to:
+1. Precisely identify the roof boundaries of the main building
+2. Measure the roof area in square feet
+3. Determine the roof shape (simple, complex, etc.)
+4. Assess the roof pitch if possible
+
+Look for these visual cues:
+- Sharp color/shadow transitions defining roof edges
+- Regular geometric shapes indicating residential structures
+- Roof material textures (shingles, metal, etc.)
+- Shadows indicating height and pitch
+- Context from surrounding structures and property layouts`
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: `Analyze this satellite image of a property. ${propertyInfo}
+              text: `Analyze this satellite image of a property at coordinates ${lat}, ${lng}. ${propertyInfo}
               
-              Please:
-              1. Identify the main building's roof outline
-              2. Calculate the approximate roof square footage
-              3. Determine if it's a simple or complex roof shape
-              4. Provide coordinates for a polygon that outlines the roof
-              5. Estimate the roof pitch if possible
-              
-              Return your analysis ONLY in JSON format with these fields:
-              {
-                "roofArea": number (in square feet),
-                "confidence": "high" | "medium" | "low",
-                "roofShape": "simple" | "complex",
-                "roofPolygon": array of {lat, lng} points,
-                "estimatedPitch": "flat" | "low" | "moderate" | "steep" | "unknown",
-                "notes": string
-              }`
+Please provide your analysis in JSON format with these fields:
+{
+  "roofArea": number (in square feet),
+  "confidence": "high" | "medium" | "low",
+  "roofShape": "simple" | "complex" | "unknown",
+  "roofPolygon": array of {lat, lng} points outlining the roof,
+  "estimatedPitch": "flat" | "low" | "moderate" | "steep" | "unknown",
+  "notes": string with your reasoning
+}`
             },
             {
               type: "image_url",
               image_url: {
-                url: `data:image/jpeg;base64,${imageBase64}`
+                url: `data:image/png;base64,${imageBase64}`
               }
             }
           ]
@@ -107,54 +155,9 @@ const analyzeRoofFromImage = async (imageBase64, propertyData, lat, lng) => {
       response_format: { type: "json_object" }
     });
     
-    // Parse the JSON response
-    let analysis;
-    try {
-      analysis = JSON.parse(response.choices[0].message.content);
-      console.log("🔍 VISION: OpenAI analysis result:", analysis);
-    } catch (parseError) {
-      console.error("🔍 VISION: Error parsing OpenAI response:", parseError);
-      console.log("🔍 VISION: Raw response:", response.choices[0].message.content);
-      throw new Error("Failed to parse OpenAI response");
-    }
-    
-    // Cross-validate with property data
-    if (propertyData && propertyData.buildingSize && propertyData.stories > 0) {
-      const footprint = propertyData.buildingSize / propertyData.stories;
-      let expectedRoofArea = footprint;
-      
-      // Adjust for roof pitch based on estimated pitch
-      const pitchFactors = {
-        'flat': 1.05,
-        'low': 1.15,
-        'moderate': 1.3,
-        'steep': 1.5,
-        'unknown': 1.25
-      };
-      
-      expectedRoofArea *= pitchFactors[analysis.estimatedPitch] || 1.25;
-      
-      // Compare with AI's estimate
-      const ratio = analysis.roofArea / expectedRoofArea;
-      console.log("🔍 VISION: Cross-validation - AI area:", analysis.roofArea, 
-                  "Expected area:", expectedRoofArea, "Ratio:", ratio);
-      
-      // If there's a significant discrepancy
-      if (ratio < 0.6 || ratio > 1.6) {
-        console.log("🔍 VISION: Significant discrepancy detected. Reducing confidence.");
-        analysis.confidence = "low";
-        analysis.notes = (analysis.notes || "") + 
-                        ` AI estimate (${analysis.roofArea} sq ft) differs significantly from property-based estimate (${Math.round(expectedRoofArea)} sq ft).`;
-      }
-    }
-    
-    return {
-      success: true,
-      ...analysis,
-      method: "openai_vision"
-    };
+    return JSON.parse(response.choices[0].message.content);
   } catch (error) {
-    console.error("🔍 VISION: OpenAI Vision analysis error:", error);
+    logError("Error analyzing image with OpenAI", { error: error.message });
     throw error;
   }
 };
@@ -162,11 +165,8 @@ const analyzeRoofFromImage = async (imageBase64, propertyData, lat, lng) => {
 /**
  * Calculate roof size from property data (fallback)
  */
-const calculateRoofSizeFromProperty = (propertyData, lat, lng) => {
-  console.log("🔍 VISION: Falling back to property-based calculation");
-  
+exports.calculateRoofSizeFromProperty = (propertyData, lat, lng) => {
   if (!propertyData || !propertyData.buildingSize) {
-    console.log("🔍 VISION: Insufficient property data for calculation");
     return null;
   }
   
@@ -189,15 +189,12 @@ const calculateRoofSizeFromProperty = (propertyData, lat, lng) => {
   
   const roofArea = Math.round(footprint * roofAreaFactor);
   
-  // Generate a simple rectangular polygon for this roof
-  const roofPolygon = generateSimpleRoofPolygon(lat, lng, roofArea);
-  
   return {
     success: true,
     roofArea,
     confidence: "medium",
     roofShape: "simple",
-    roofPolygon,
+    roofPolygon: generateSimpleRoofPolygon(lat, lng, roofArea),
     estimatedPitch: "moderate",
     method: "property_data_calculation",
     notes: "Calculated from property data only."
@@ -207,24 +204,25 @@ const calculateRoofSizeFromProperty = (propertyData, lat, lng) => {
 /**
  * Generate a simple rectangular roof polygon
  */
-const generateSimpleRoofPolygon = (lat, lng, roofArea) => {
-  // Calculate dimensions based on a typical aspect ratio
-  const aspectRatio = 1.5; // Length:Width ratio
-  const totalAreaMeters = roofArea / 10.7639; // Convert sq ft to sq meters
+function generateSimpleRoofPolygon(lat, lng, size) {
+  // Basic square conversion - 1 sq foot = 0.092903 sq meters
+  const sqMeters = size * 0.092903;
   
-  // Calculate dimensions
-  const width = Math.sqrt(totalAreaMeters / aspectRatio);
-  const length = width * aspectRatio;
+  // Apply scale correction
+  const adjustedSqMeters = sqMeters * 0.5;
   
-  // Convert to degrees
-  const metersPerDegreeLat = 111319.9; // at equator
-  const latRadians = lat * (Math.PI / 180);
-  const metersPerDegreeLng = metersPerDegreeLat * Math.cos(latRadians);
+  // Calculate dimensions for a square
+  const side = Math.sqrt(adjustedSqMeters);
   
-  const latOffset = (length / 2) / metersPerDegreeLat;
-  const lngOffset = (width / 2) / metersPerDegreeLng;
+  // Convert to degrees (rough approximation)
+  // 1 degree lat = ~111km, 1 degree lng varies with latitude
+  const latDegPerMeter = 1 / 111000;
+  const lngDegPerMeter = 1 / (111000 * Math.cos(lat * Math.PI / 180));
   
-  // Create rectangle
+  const latOffset = side * latDegPerMeter / 2;
+  const lngOffset = side * lngDegPerMeter / 2;
+  
+  // Create rectangle coordinates with closing point
   return [
     { lat: lat - latOffset, lng: lng - lngOffset },
     { lat: lat - latOffset, lng: lng + lngOffset },
@@ -232,9 +230,14 @@ const generateSimpleRoofPolygon = (lat, lng, roofArea) => {
     { lat: lat + latOffset, lng: lng - lngOffset },
     { lat: lat - latOffset, lng: lng - lngOffset } // Close the polygon
   ];
-};
+}
 
-module.exports = {
-  analyzeRoof,
-  calculateRoofSizeFromProperty
-};
+// Helper function to convert confidence to number for sorting
+function confidenceToNumber(confidence) {
+  switch (confidence) {
+    case 'high': return 3;
+    case 'medium': return 2;
+    case 'low': return 1;
+    default: return 0;
+  }
+}
