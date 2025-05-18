@@ -46,73 +46,96 @@ const makeOpenAIRequest = async (requestData) => {
  */
 const generateRoofEstimate = async (data) => {
   try {
-    // Construct prompt for OpenAI
+    // Construct prompt for OpenAI with the updated national price guidance
     const prompt = `
- const prompt = `
-  Generate a detailed roofing cost estimate with the following parameters:
-  - Roof size: ${data.roofSize} square feet
-  - Roof steepness: ${data.roofSteepness}
-  - Desired material: ${data.desiredRoofMaterial}
-  - Current material: ${data.currentRoofMaterial || 'Not specified'}
-  - Building type: ${data.buildingType || 'Not specified'}
-  - Location: ${data.city || ''}, ${data.state || ''}
-  - Timeline: ${data.timeline || 'Not specified'}
-  
-  STRICT NATIONAL PRICE GUIDANCE (Base prices that MUST be followed):
-  
-  ASPHALT SHINGLES (National average installed cost):
-  - 3-tab standard: $5.50-$7.50 per sq ft
-  - Architectural/dimensional: $7.00-$9.50 per sq ft
-  - Premium designer: $8.00-$11.00 per sq ft
-  
-  METAL ROOFING (National average installed cost):
-  - Standing seam: $10.00-$14.00 per sq ft
-  - Metal shingles: $8.50-$12.00 per sq ft
-  - Corrugated panels: $7.00-$10.00 per sq ft
-  
-  TILE ROOFING (National average installed cost):
-  - Concrete tile: $12.00-$16.00 per sq ft
-  - Clay tile: $15.00-$20.00 per sq ft
-  
-  CEDAR SHAKES (National average installed cost):
-  - Cedar shingles: $9.00-$13.00 per sq ft
-  - Cedar shakes: $11.00-$16.00 per sq ft
-  
-  REGIONAL ADJUSTMENT FACTORS (MUST be applied to base prices):
-  - Northeast (ME, NH, VT, MA, RI, CT, NY, NJ, PA): +10%
-  - Mid-Atlantic (DE, MD, DC, VA, WV): +5%
-  - Southeast (NC, SC, GA, FL, AL, MS, TN, KY): -5%
-  - Midwest (OH, IN, IL, MI, WI, MN, IA, MO): -3%
-  - Great Plains (ND, SD, NE, KS, OK): -10%
-  - Rocky Mountains (MT, ID, WY, CO, UT): +5%
-  - Southwest (AZ, NM, TX, NV): -7%
-  - West Coast (CA, OR, WA): +15%
-  - Alaska & Hawaii: +25%
-  
-  ROOF STEEPNESS FACTORS (MUST be applied after regional adjustment):
-  - Flat: Multiply by 0.9 (10% reduction)
-  - Low: Multiply by 1.0 (no change)
-  - Moderate: Multiply by 1.1 (10% increase)
-  - Steep: Multiply by 1.25 (25% increase)
-  
-  COST BREAKDOWN (% of total):
-  - Materials: 40%
-  - Labor: 45%
-  - Removal & Disposal: 8%
-  - Permits & Overhead: 7%
-  
-  Additional modifiers:
-  - Emergency timeline: +10%
-  - ASAP timeline: +5%
-  - Same material replacement: -3% (simplified removal)
-  - Residential building: Standard pricing
-  - Commercial building: +15%
-  
-  Calculate the final cost using this formula:
-  Base Material Cost × Regional Factor × Steepness Factor × Timeline Factor = Final Price Per Sq Ft
-  
-  Provide the complete estimate with all the requested components in JSON format. Ensure your pricing calculations follow these guidelines precisely.
-`;
+      Generate a detailed roofing cost estimate with the following parameters:
+      - Roof size: ${data.roofSize} square feet
+      - Roof steepness: ${data.roofSteepness}
+      - Desired material: ${data.desiredRoofMaterial}
+      - Current material: ${data.currentRoofMaterial || 'Not specified'}
+      - Building type: ${data.buildingType || 'Not specified'}
+      - Location: ${data.city || ''}, ${data.state || ''}
+      - Timeline: ${data.timeline || 'Not specified'}
+      
+      STRICT NATIONAL PRICE GUIDANCE (Base prices that MUST be followed):
+      
+      ASPHALT SHINGLES (National average installed cost):
+      - 3-tab standard: $5.50-$7.50 per sq ft
+      - Architectural/dimensional: $7.00-$9.50 per sq ft
+      - Premium designer: $8.00-$11.00 per sq ft
+      
+      METAL ROOFING (National average installed cost):
+      - Standing seam: $10.00-$14.00 per sq ft
+      - Metal shingles: $8.50-$12.00 per sq ft
+      - Corrugated panels: $7.00-$10.00 per sq ft
+      
+      TILE ROOFING (National average installed cost):
+      - Concrete tile: $12.00-$16.00 per sq ft
+      - Clay tile: $15.00-$20.00 per sq ft
+      
+      CEDAR SHAKES (National average installed cost):
+      - Cedar shingles: $9.00-$13.00 per sq ft
+      - Cedar shakes: $11.00-$16.00 per sq ft
+      
+      REGIONAL ADJUSTMENT FACTORS (MUST be applied to base prices):
+      - Northeast (ME, NH, VT, MA, RI, CT, NY, NJ, PA): +10%
+      - Mid-Atlantic (DE, MD, DC, VA, WV): +5%
+      - Southeast (NC, SC, GA, FL, AL, MS, TN, KY): -5%
+      - Midwest (OH, IN, IL, MI, WI, MN, IA, MO): -3%
+      - Great Plains (ND, SD, NE, KS, OK): -10%
+      - Rocky Mountains (MT, ID, WY, CO, UT): +5%
+      - Southwest (AZ, NM, TX, NV): -7%
+      - West Coast (CA, OR, WA): +15%
+      - Alaska & Hawaii: +25%
+      
+      ROOF STEEPNESS FACTORS (MUST be applied after regional adjustment):
+      - Flat: Multiply by 0.9 (10% reduction)
+      - Low: Multiply by 1.0 (no change)
+      - Moderate: Multiply by 1.1 (10% increase)
+      - Steep: Multiply by 1.25 (25% increase)
+      
+      COST BREAKDOWN (% of total):
+      - Materials: 40%
+      - Labor: 45%
+      - Removal & Disposal: 8%
+      - Permits & Overhead: 7%
+      
+      Additional modifiers:
+      - Emergency timeline: +10%
+      - ASAP timeline: +5%
+      - Same material replacement: -3% (simplified removal)
+      - Residential building: Standard pricing
+      - Commercial building: +15%
+      
+      Calculate the final cost using this formula:
+      Base Material Cost × Regional Factor × Steepness Factor × Timeline Factor = Final Price Per Sq Ft
+      
+      Provide a complete estimate including:
+      1. Total cost range (low, average, high)
+      2. Cost breakdown by category (materials, labor, removal, etc.)
+      3. Price per square foot
+      4. Factors affecting the price
+      5. Material information (lifespan, pros, cons)
+      
+      Format the response as a JSON object with the following structure:
+      {
+        "lowEstimate": number,
+        "estimate": number,
+        "highEstimate": number,
+        "pricePerSqft": number,
+        "estimateParts": [
+          { "name": string, "cost": number }
+        ],
+        "estimateFactors": [
+          { "factor": string, "impact": string, "description": string }
+        ],
+        "materialInfo": {
+          "lifespan": string,
+          "pros": [string],
+          "cons": [string]
+        }
+      }
+    `;
     
     // Call OpenAI API
     const requestData = {
@@ -155,38 +178,67 @@ const generateSimulatedEstimate = (data) => {
   
   // Price per square foot based on material
   const basePricePerSqft = {
-    'asphalt': 4.5,
-    'metal': 9.5,
-    'tile': 12.5,
-    'cedar': 8.5
-  }[data.desiredRoofMaterial] || 6.0;
-  
-  // Adjustment factors
-  const steepnessFactor = {
-    'flat': 0.9,
-    'low': 1.0,
-    'moderate': 1.15,
-    'steep': 1.4
-  }[data.roofSteepness] || 1.0;
+    'asphalt': 6.5,  // Reduced from original to match new guidelines
+    'metal': 11.0,
+    'tile': 14.0,
+    'cedar': 11.0
+  }[data.desiredRoofMaterial] || 6.5;
   
   // Regional adjustment based on state
   const regionFactor = (() => {
     if (!data.state) return 1.0;
     
     const state = data.state.toUpperCase();
-    // Higher cost regions
-    if (['CA', 'NY', 'MA', 'NJ', 'CT', 'WA', 'DC'].includes(state)) return 1.25;
-    // Medium cost regions
-    if (['CO', 'OR', 'IL', 'MD', 'VA', 'MN', 'RI'].includes(state)) return 1.1;
-    // Lower cost regions
-    if (['TX', 'FL', 'GA', 'NC', 'TN', 'AL', 'MS', 'KY', 'OK', 'AR'].includes(state)) return 0.9;
+    // West Coast (higher cost)
+    if (['CA', 'OR', 'WA'].includes(state)) return 1.15;
+    // Northeast
+    if (['ME', 'NH', 'VT', 'MA', 'RI', 'CT', 'NY', 'NJ', 'PA'].includes(state)) return 1.1;
+    // Mid-Atlantic
+    if (['DE', 'MD', 'DC', 'VA', 'WV'].includes(state)) return 1.05;
+    // Rocky Mountains
+    if (['MT', 'ID', 'WY', 'CO', 'UT'].includes(state)) return 1.05;
+    // Alaska & Hawaii
+    if (['AK', 'HI'].includes(state)) return 1.25;
+    // Southeast
+    if (['NC', 'SC', 'GA', 'FL', 'AL', 'MS', 'TN', 'KY'].includes(state)) return 0.95;
+    // Midwest
+    if (['OH', 'IN', 'IL', 'MI', 'WI', 'MN', 'IA', 'MO'].includes(state)) return 0.97;
+    // Great Plains
+    if (['ND', 'SD', 'NE', 'KS', 'OK'].includes(state)) return 0.9;
+    // Southwest
+    if (['AZ', 'NM', 'TX', 'NV'].includes(state)) return 0.93;
     
     return 1.0;
   })();
   
+  // Adjustment factors
+  const steepnessFactor = {
+    'flat': 0.9,
+    'low': 1.0,
+    'moderate': 1.1,
+    'steep': 1.25
+  }[data.roofSteepness] || 1.0;
+  
+  // Timeline factor
+  const timelineFactor = {
+    'emergency': 1.1,
+    'asap': 1.05,
+    '1_3_months': 1.0,
+    'planning': 0.98
+  }[data.timeline] || 1.0;
+  
+  // Building type factor
+  const buildingFactor = data.buildingType === 'commercial' ? 1.15 : 1.0;
+  
+  // Same material replacement discount
+  const materialReplacementFactor = 
+    data.currentRoofMaterial && data.currentRoofMaterial === data.desiredRoofMaterial 
+      ? 0.97 
+      : 1.0;
+  
   // Calculate estimate
   const totalSqft = parseFloat(data.roofSize) || 3000;
-  const adjustedPricePerSqft = basePricePerSqft * steepnessFactor * regionFactor;
+  const adjustedPricePerSqft = basePricePerSqft * regionFactor * steepnessFactor * timelineFactor * buildingFactor * materialReplacementFactor;
   const averagePrice = Math.round(totalSqft * adjustedPricePerSqft);
   
   // Material info based on selection
@@ -217,24 +269,85 @@ const generateSimulatedEstimate = (data) => {
     cons: ['May require regular maintenance', 'Performance varies by climate']
   };
   
+  // Generate estimate factors
+  const estimateFactors = [];
+  
+  // Add roof size factor
+  estimateFactors.push({
+    factor: "Roof Size",
+    impact: "High Impact",
+    description: `Your ${totalSqft} sq ft roof is the primary cost factor`
+  });
+  
+  // Add steepness factor if significant
+  if (data.roofSteepness === 'steep') {
+    estimateFactors.push({
+      factor: "Roof Steepness",
+      impact: "High Impact",
+      description: "Steep roofs require more safety measures and time, increasing labor costs."
+    });
+  } else if (data.roofSteepness === 'moderate') {
+    estimateFactors.push({
+      factor: "Roof Steepness",
+      impact: "Moderate Impact",
+      description: "Moderate slope requires additional care during installation."
+    });
+  }
+  
+  // Add regional factor
+  if (regionFactor !== 1.0) {
+    const regionImpact = regionFactor > 1.1 ? "High Impact" : "Moderate Impact";
+    estimateFactors.push({
+      factor: "Regional Adjustment",
+      impact: regionImpact,
+      description: data.state ? `${data.city || ''} ${data.state} region ${regionFactor > 1.0 ? 'increases' : 'decreases'} costs by ${Math.abs(Math.round((regionFactor - 1) * 100))}%` : 'National average pricing used'
+    });
+  }
+  
+  // Add material factor
+  estimateFactors.push({
+    factor: "Material Choice",
+    impact: "Moderate Impact",
+    description: `${data.desiredRoofMaterial.charAt(0).toUpperCase() + data.desiredRoofMaterial.slice(1)} impacts overall cost and longevity`
+  });
+  
+  // Add timeline factor if significant
+  if (data.timeline === 'emergency' || data.timeline === 'asap') {
+    estimateFactors.push({
+      factor: "Timeline",
+      impact: data.timeline === 'emergency' ? "High Impact" : "Moderate Impact",
+      description: `${data.timeline === 'emergency' ? 'Emergency' : 'ASAP'} timeline requires priority scheduling, adding to costs`
+    });
+  }
+  
+  // Material match factor if applicable
+  if (data.currentRoofMaterial && data.currentRoofMaterial === data.desiredRoofMaterial) {
+    estimateFactors.push({
+      factor: "Material Match",
+      impact: "Neutral",
+      description: "The current material is asphalt, which simplifies installation and disposal."
+    });
+  }
+  
+  // Calculate cost breakdown parts
+  const materialCost = Math.round(averagePrice * 0.40);
+  const laborCost = Math.round(averagePrice * 0.45);
+  const removalCost = Math.round(averagePrice * 0.08);
+  const permitsCost = Math.round(averagePrice * 0.07);
+  
   return {
-    lowEstimate: Math.round(averagePrice * 0.85),
+    lowEstimate: Math.round(averagePrice * 0.9),
     estimate: averagePrice,
-    highEstimate: Math.round(averagePrice * 1.15),
+    highEstimate: Math.round(averagePrice * 1.1),
     pricePerSqft: Math.round(adjustedPricePerSqft * 10) / 10,
     estimateParts: [
-      { name: "Removal & Disposal", cost: Math.round(averagePrice * 0.15) },
-      { name: "Materials", cost: Math.round(averagePrice * 0.45) },
-      { name: "Labor", cost: Math.round(averagePrice * 0.3) },
-      { name: "Permits & Overhead", cost: Math.round(averagePrice * 0.1) }
+      { name: "Materials", cost: materialCost },
+      { name: "Labor", cost: laborCost },
+      { name: "Removal & Disposal", cost: removalCost },
+      { name: "Permits & Overhead", cost: permitsCost }
     ],
-    estimateFactors: [
-      { factor: "Roof Size", impact: "High Impact", description: `Your ${totalSqft} sq ft roof is the primary cost factor` },
-      { factor: "Roof Steepness", impact: steepnessFactor > 1.1 ? "High Impact" : "Medium Impact", description: `${data.roofSteepness} roof requires ${data.roofSteepness === 'steep' ? 'specialized equipment' : 'standard installation'}` },
-      { factor: "Material", impact: "High Impact", description: `${data.desiredRoofMaterial} roofing affects cost and longevity` },
-      { factor: "Location", impact: regionFactor !== 1.0 ? "Medium Impact" : "Low Impact", description: data.state ? `Regional costs in ${data.state} ${regionFactor > 1.0 ? 'increase' : 'decrease'} overall price` : 'National average pricing used' }
-    ],
-    materialInfo
+    estimateFactors: estimateFactors,
+    materialInfo: materialInfo
   };
 };
 
