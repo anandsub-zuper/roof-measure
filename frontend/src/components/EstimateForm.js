@@ -1,4 +1,4 @@
-// EstimateForm.js - Fixed version
+// src/components/EstimateForm.js - Complete fixed version
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -70,7 +70,7 @@ const EstimateForm = () => {
     { component: ContactInfoStep, title: 'Contact Info' }
   ];
   
-  // Navigate to next step
+  // Navigate to next step - FIXED VERSION
   const nextStep = useCallback(async () => {
     // Special handling for certain steps
     if (currentStep === 0 && formData.address) {
@@ -79,24 +79,29 @@ const EstimateForm = () => {
         // Get coordinates from address
         const addressData = await apiService.getAddressCoordinates(formData.address);
         
-        // Update form with coordinates and address components
-        if (addressData && addressData.data) {
-          updateFormData('lat', addressData.data.lat);
-          updateFormData('lng', addressData.data.lng);
-          updateFormData('city', addressData.data.city || '');
-          updateFormData('state', addressData.data.state || '');
-          updateFormData('zipCode', addressData.data.zipCode || '');
-        }
+        console.log('Address data received:', addressData);
         
-        // Estimate roof size if coordinates are available
-        if (addressData && addressData.data && addressData.data.lat && addressData.data.lng) {
-          const roofSizeData = await apiService.getRoofSizeEstimate(
-            addressData.data.lat, 
-            addressData.data.lng
-          );
+        // The API returns the data directly, not in a nested 'data' property
+        if (addressData && addressData.success) {
+          // Update form with coordinates and address components
+          updateFormData('lat', addressData.lat);
+          updateFormData('lng', addressData.lng);
+          updateFormData('city', addressData.city || '');
+          updateFormData('state', addressData.state || '');
+          updateFormData('zipCode', addressData.zipCode || '');
           
-          if (roofSizeData && roofSizeData.data) {
-            updateFormData('roofSize', roofSizeData.data.size || 3000);
+          // Estimate roof size if coordinates are available
+          if (addressData.lat && addressData.lng) {
+            const roofSizeData = await apiService.getRoofSizeEstimate(
+              addressData.lat, 
+              addressData.lng
+            );
+            
+            console.log('Roof size data received:', roofSizeData);
+            
+            if (roofSizeData && roofSizeData.success) {
+              updateFormData('roofSize', roofSizeData.size || 3000);
+            }
           }
         }
       } catch (error) {
@@ -113,8 +118,8 @@ const EstimateForm = () => {
       setIsLoading(true);
       try {
         const estimateResponse = await apiService.generateRoofEstimate(formData);
-        if (estimateResponse && estimateResponse.data) {
-          setEstimateResult(estimateResponse.data);
+        if (estimateResponse && estimateResponse.success) {
+          setEstimateResult(estimateResponse);
         }
       } catch (error) {
         console.error("Error generating estimate:", error);
