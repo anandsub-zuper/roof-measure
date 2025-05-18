@@ -1,13 +1,15 @@
 // src/components/steps/RoofSizeStep.js
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
 import GoogleMapContainer from '../map/GoogleMapContainer';
+import config from '../../config'; // Import the config file
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [skipMap, setSkipMap] = useState(false);
+  const [mapDisabled, setMapDisabled] = useState(false);
   const mapContainerRef = useRef(null);
   
   console.log("RoofSizeStep rendering with formData:", {
@@ -15,6 +17,37 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     lng: formData.lng,
     roofSize: formData.roofSize
   });
+
+  // Check if Google Maps is disabled due to missing API key
+  useEffect(() => {
+    // Check for the flag set in config.js
+    if (window.googleMapsDisabled) {
+      console.log("Maps disabled due to missing API key, skipping map view");
+      setMapDisabled(true);
+      setLoading(false);
+      
+      // Set a default roof size if needed
+      if (!formData.roofSize) {
+        updateFormData('roofSize', 3000);
+      }
+    }
+    
+    // Fallback timeout - if loading doesn't complete in 15 seconds, force skip
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.log("Map loading timeout reached, skipping map");
+        setSkipMap(true);
+        setLoading(false);
+        
+        // Set a default roof size if needed
+        if (!formData.roofSize) {
+          updateFormData('roofSize', 3000);
+        }
+      }
+    }, 15000);
+    
+    return () => clearTimeout(timeoutId);
+  }, [formData.roofSize, loading, updateFormData]);
 
   // Handle map events
   const handleMapReady = () => {
@@ -71,6 +104,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   };
 
   const handleSkipMap = () => {
+    console.log("User manually skipped map view");
     setSkipMap(true);
     
     // Set a default roof size if none exists
@@ -81,14 +115,35 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     setLoading(false);
   };
 
+  // Debug function for environment variables  
+  const debugEnvironment = () => {
+    console.log("Environment check:", {
+      googleMapsKey: config.googleMapsApiKey ? "Present (first 4 chars: " + config.googleMapsApiKey.substring(0,4) + "...)" : "Missing",
+      apiUrl: config.apiUrl,
+      mapDisabled: mapDisabled,
+      skipMap: skipMap,
+      formDataRoofSize: formData.roofSize
+    });
+  };
+
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
       <p className="text-sm text-gray-600 mb-4">{formData.address}</p>
       
+      {/* Debug button - only in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <button 
+          onClick={debugEnvironment}
+          className="mb-2 text-xs text-gray-400 hover:text-gray-600"
+        >
+          Debug Environment
+        </button>
+      )}
+      
       {/* Map Container with Satellite View */}
       <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
-        {hasValidCoordinates() && !skipMap ? (
+        {hasValidCoordinates() && !skipMap && !mapDisabled ? (
           <GoogleMapContainer
             ref={mapContainerRef}
             lat={formData.lat}
@@ -101,8 +156,15 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
             <Camera size={40} className="mb-2 text-gray-400" />
-            {skipMap ? (
-              <p className="text-gray-500">Map view skipped</p>
+            {skipMap || mapDisabled ? (
+              <>
+                <p className="text-gray-500">
+                  {mapDisabled ? "Map view disabled" : "Map view skipped"}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Using estimated roof size
+                </p>
+              </>
             ) : (
               <>
                 <p className="text-gray-500">No coordinates available</p>
@@ -115,7 +177,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         )}
         
         {/* Loading overlay */}
-        {hasValidCoordinates() && loading && !error && !skipMap && (
+        {hasValidCoordinates() && loading && !error && !skipMap && !mapDisabled && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Loading satellite imagery...</p>
@@ -138,7 +200,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         )}
 
         {/* Zoom controls */}
-        {hasValidCoordinates() && !loading && !skipMap && !error && (
+        {hasValidCoordinates() && !loading && !skipMap && !mapDisabled && !error && (
           <div className="absolute top-2 right-2 flex flex-col z-20">
             <button
               type="button"
@@ -157,7 +219,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </div>
         )}
 
-        {hasValidCoordinates() && !loading && !skipMap && !error && (
+        {hasValidCoordinates() && !loading && !skipMap && !mapDisabled && !error && (
           <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
             <Ruler size={16} className="mr-1" /> Estimated roof outline
           </div>
@@ -175,8 +237,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
         
         <p className="text-sm text-gray-600 mb-3">
-          {skipMap || error ? "Using estimated roof size." : "Our AI analyzed your roof using satellite imagery."}
-          You can also enter the size manually.
+          {skipMap || error || mapDisabled ? 
+            "Using estimated roof size based on property data." : 
+            "Our AI analyzed your roof using satellite imagery."}
+          {" You can also enter the size manually."}
         </p>
 
         {/* Auto/Manual Toggle */}
@@ -188,7 +252,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               onChange={handleToggleAutoSize}
               className="mr-2 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
             />
-            Use AI-calculated size (recommended)
+            Use {skipMap || error || mapDisabled ? "estimated" : "AI-calculated"} size (recommended)
           </label>
         </div>
 
