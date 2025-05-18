@@ -1,7 +1,8 @@
-// frontend/src/utils/imageUtils.js
+// src/utils/imageUtils.js - Fixed version
 /**
  * Utility functions for capturing and processing images
  */
+import html2canvas from 'html2canvas'; // Direct import instead of dynamic import
 
 /**
  * Captures the current state of a Google Map as a base64 image
@@ -38,30 +39,33 @@ export const captureMapImage = (mapInstance) => {
         marker.style.visibility = 'hidden';
       });
 
-      // Use html2canvas to capture the map
-      import('html2canvas').then(({ default: html2canvas }) => {
-        html2canvas(mapDiv, {
-          useCORS: true,
-          allowTaint: true,
-          scale: 2, // Higher quality
-        }).then(canvas => {
-          // Convert canvas to base64 image
-          const imageBase64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
-          
-          // Restore UI elements
-          originalControls.forEach(({ control, visible }) => {
-            control.style.display = visible ? '' : 'none';
-          });
-          
-          // Restore markers
-          markers.forEach(marker => {
-            marker.style.visibility = '';
-          });
-          
-          resolve(imageBase64);
-        }).catch(reject);
-      }).catch(reject);
+      // Use html2canvas directly without dynamic import
+      html2canvas(mapDiv, {
+        useCORS: true,
+        allowTaint: true,
+        scale: 1.5, // Reduced from 2 to optimize performance and file size
+        logging: false, // Disable logging
+      }).then(canvas => {
+        // Convert canvas to base64 image
+        const imageBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]; // Reduced quality slightly
+        
+        // Restore UI elements
+        originalControls.forEach(({ control, visible }) => {
+          control.style.display = visible ? '' : 'none';
+        });
+        
+        // Restore markers
+        markers.forEach(marker => {
+          marker.style.visibility = '';
+        });
+        
+        resolve(imageBase64);
+      }).catch(error => {
+        console.error("Error capturing map image:", error);
+        reject(error);
+      });
     } catch (error) {
+      console.error("Error in captureMapImage:", error);
       reject(error);
     }
   });
