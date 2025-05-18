@@ -1,5 +1,5 @@
 // src/components/steps/RoofSizeStep.js
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
 
@@ -9,9 +9,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const roofPolygonRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const isMounted = useRef(true); // Use useRef for the mounted flag
 
-  // Convert meters to degrees at the property's latitude
-  const metersToDegrees = (meters, lat) => {
+  // Convert meters to degrees at the property's latitude (memoized)
+  const metersToDegrees = useCallback((meters, lat) => {
     const latRad = lat * (Math.PI / 180);
     const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
     const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
@@ -19,10 +20,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       lat: meters / latDeg,
       lng: meters / lngDeg
     };
-  };
+  }, []);
 
-  // Create polygon from coordinates
-  const createPolygon = (coords, map) => {
+  // Create polygon from coordinates (memoized)
+  const createPolygon = useCallback((coords, map) => {
     return new window.google.maps.Polygon({
       paths: coords,
       strokeColor: '#2563EB',
@@ -30,12 +31,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       strokeWeight: 2.5,
       fillColor: '#2563EB',
       fillOpacity: 0.4,
-      zIndex: 100
+      zIndex: 100,
+      map: map // Ensure map is set during creation
     });
-  };
+  }, []);
 
-  // Fallback to estimated polygon
-  const createEstimatedPolygon = (lat, lng) => {
+  // Fallback to estimated polygon (memoized)
+  const createEstimatedPolygon = useCallback((lat, lng) => {
     const conversion = metersToDegrees(15, lat);
     return [
       { lat: lat - conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }, // SW
@@ -43,13 +45,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       { lat: lat + conversion.lat * 0.4, lng: lng + conversion.lng * 0.8 }, // NE
       { lat: lat + conversion.lat * 0.4, lng: lng - conversion.lng * 0.8 }  // NW
     ];
-  };
+  }, [metersToDegrees]);
 
   // Initialize Google Maps with satellite view
   useEffect(() => {
     let map;
     let placesService;
-    let isMounted = true; // To prevent state updates on unmounted component
 
     const loadGoogleMapsScript = () => {
       if (window.google && window.google.maps) {
@@ -70,12 +71,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       script.defer = true;
 
       script.onload = () => {
-        if (isMounted) {
+        if (isMounted.current) {
           initMap();
         }
       };
       script.onerror = () => {
-        if (isMounted) {
+        if (isMounted.current) {
           setError("Failed to load Google Maps API");
           setLoading(false);
         }
@@ -85,7 +86,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     };
 
     const initMap = () => {
-      if (!isMounted || !mapContainerRef.current || !window.google?.maps) {
+      if (!isMounted.current || !mapContainerRef.current || !window.google?.maps) {
         return;
       }
 
@@ -119,7 +120,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
         mapRef.current = map;
 
-        // Initialize Places API (acknowledging deprecation)
         placesService = new window.google.maps.places.PlacesService(map);
         console.warn("Using google.maps.places.PlacesService which is deprecated for new customers as of March 1st, 2025. Please consider migrating to the new Places API (New). See https://developers.google.com/maps/legacy and https://developers.google.com/maps/documentation/javascript/places-migration-overview for more information.");
 
@@ -130,8 +130,9 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         };
 
         placesService.findPlaceFromQuery(request, (results, status) => {
-          if (!isMounted) return;
+          if (!isMounted.current) return;
 
+          let polygon;
           let polygonCoords;
 
           if (status === 'OK' && results && results.length > 0 && results[0]?.geometry?.viewport) {
@@ -142,23 +143,23 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               bounds.getNorthEast(),
               { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
             ];
+            polygon = createPolygon(polygonCoords, map);
           } else {
             polygonCoords = createEstimatedPolygon(lat, lng);
+            polygon = createPolygon(polygonCoords, map);
             if (status !== 'OK') {
               console.error("Places API error:", status);
               setError("Could not retrieve precise roof outline. Showing estimated.");
             }
           }
 
-          const polygon = createPolygon(polygonCoords, map);
-          polygon.setMap(map);
           roofPolygonRef.current = polygon;
           setLoading(false);
         });
 
       } catch (err) {
         console.error("Error initializing map:", err);
-        if (isMounted) {
+        if (isMounted.current) {
           setError("Error initializing map");
           setLoading(false);
         }
@@ -168,15 +169,14 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     loadGoogleMapsScript();
 
     return () => {
-      isMounted = false;
+      isMounted.current = false;
       if (map) {
         window.google.maps.event.clearInstanceListeners(map);
+        map.setDiv(null); // Try explicitly removing the map from its container
       }
-      if (roofPolygonRef.current) {
-        roofPolygonRef.current.setMap(null);
-      }
+      roofPolygonRef.current = null; // Clear the ref
     };
-  }, [formData.lat, formData.lng, formData.address]);
+  }, [formData.lat, formData.lng, formData.address, createPolygon, createEstimatedPolygon, metersToDegrees]); // Add dependencies for useCallback
 
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
