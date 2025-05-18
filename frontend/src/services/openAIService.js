@@ -1,10 +1,8 @@
 // frontend/src/services/openAIService.js
-
 /**
  * Client-side service for OpenAI-related functionality
  * This makes API calls to your backend, which then uses OpenAI
  */
-
 import apiService from './apiService';
 
 /**
@@ -31,7 +29,6 @@ export const generateEstimate = async (formData) => {
 export const askRoofingQuestion = async (question) => {
   try {
     // This would call a backend endpoint that uses OpenAI
-    // Example implementation - update to match your backend API
     const response = await apiService.post('/api/ask', { question });
     return response.data;
   } catch (error) {
@@ -40,7 +37,28 @@ export const askRoofingQuestion = async (question) => {
   }
 };
 
+/**
+ * Analyze roof image to detect roof boundaries using OpenAI Vision
+ * @param {string} imageBase64 - Base64 encoded image of the roof from satellite view
+ * @returns {Promise<Array>} - Resolves with array of coordinates forming the roof polygon
+ */
+export const analyzeRoofImage = async (imageBase64) => {
+  try {
+    // Send the image to our backend to process with OpenAI Vision
+    const response = await apiService.post('/api/analyze-roof', {
+      image: imageBase64
+    });
+    
+    // Return the coordinates from the response
+    return response.data.coordinates;
+  } catch (error) {
+    console.error('Error analyzing roof image:', error);
+    throw error;
+  }
+};
+
 export default {
   generateEstimate,
-  askRoofingQuestion
+  askRoofingQuestion,
+  analyzeRoofImage
 };
