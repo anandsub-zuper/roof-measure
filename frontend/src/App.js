@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import EstimateForm from './components/EstimateForm';
 import ThankYouPage from './components/ThankYouPage';
+import ErrorBoundary from './components/ErrorBoundary';
 import './App.css';
 
 function App() {
@@ -21,12 +22,14 @@ function App() {
   }, []);
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<EstimateForm />} />
-        <Route path="/thank-you" element={<ThankYouPage />} />
-      </Routes>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <Routes>
+          <Route path="/" element={<EstimateForm />} />
+          <Route path="/thank-you" element={<ThankYouPage />} />
+        </Routes>
+      </Router>
+    </ErrorBoundary>
   );
 }
 
