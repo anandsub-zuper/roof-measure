@@ -1,4 +1,5 @@
-// src/components/steps/RoofSizeStep.js
+// src/components/steps/RoofSizeStep.js - Fixed version
+
 import React, { useEffect, useRef } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
@@ -10,59 +11,131 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   
   // Initialize Google Maps with satellite view
   useEffect(() => {
-    if (window.google && window.google.maps && mapContainerRef.current && formData.lat && formData.lng) {
-      // Create map centered on the property
-      const map = new window.google.maps.Map(mapContainerRef.current, {
-        center: { lat: formData.lat, lng: formData.lng },
-        zoom: 19,
-        mapTypeId: 'satellite',
-        tilt: 0,
-        mapTypeControl: false,
-        streetViewControl: false,
-        rotateControl: false,
-        fullscreenControl: true,
-        zoomControlOptions: {
-          position: window.google.maps.ControlPosition.RIGHT_TOP
-        }
-      });
-      mapRef.current = map;
+    // Function to load Google Maps API script
+    const loadGoogleMapsScript = () => {
+      // Check if script is already loaded
+      if (window.google && window.google.maps) {
+        initMap();
+        return;
+      }
       
-      // Add a marker for the property
-      new window.google.maps.Marker({
-        position: { lat: formData.lat, lng: formData.lng },
-        map: map,
-        title: formData.address
-      });
+      console.log("Loading Google Maps API for satellite view...");
+      const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
       
-      // Create a simulated roof outline (polygon)
-      // In a real app, this would come from satellite imagery analysis
-      const roofPolygon = createRoofPolygon(formData.lat, formData.lng);
-      roofPolygon.setMap(map);
-      roofPolygonRef.current = roofPolygon;
-    }
+      if (!API_KEY) {
+        console.error("Google Maps API key is missing!");
+        return;
+      }
+      
+      // Create script element
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry`;
+      script.async = true;
+      script.defer = true;
+      
+      // Handle script load success
+      script.onload = () => {
+        console.log("Google Maps API loaded successfully for map");
+        initMap();
+      };
+      
+      // Handle script load error
+      script.onerror = (error) => {
+        console.error("Error loading Google Maps API:", error);
+      };
+      
+      // Add script to document
+      document.head.appendChild(script);
+    };
+    
+    // Initialize Map
+    const initMap = () => {
+      if (!mapContainerRef.current || !window.google || !window.google.maps) {
+        console.error("Map container or Google Maps not available");
+        return;
+      }
+      
+      if (!formData.lat || !formData.lng) {
+        console.error("Latitude or longitude is missing", formData);
+        return;
+      }
+      
+      console.log("Initializing map with coords:", formData.lat, formData.lng);
+      
+      try {
+        // Create map centered on the property
+        const mapOptions = {
+          center: { lat: parseFloat(formData.lat), lng: parseFloat(formData.lng) },
+          zoom: 19,
+          mapTypeId: 'satellite',
+          tilt: 0,
+          mapTypeControl: false,
+          streetViewControl: false,
+          rotateControl: false,
+          fullscreenControl: true,
+          zoomControlOptions: {
+            position: window.google.maps.ControlPosition.RIGHT_TOP
+          }
+        };
+        
+        const map = new window.google.maps.Map(mapContainerRef.current, mapOptions);
+        mapRef.current = map;
+        
+        // Add a marker for the property
+        new window.google.maps.Marker({
+          position: { lat: parseFloat(formData.lat), lng: parseFloat(formData.lng) },
+          map: map,
+          title: formData.address
+        });
+        
+        // Create a simulated roof outline
+        const roofPolygon = createRoofPolygon(parseFloat(formData.lat), parseFloat(formData.lng));
+        roofPolygon.setMap(map);
+        roofPolygonRef.current = roofPolygon;
+        
+        console.log("Map initialized successfully");
+      } catch (error) {
+        console.error("Error initializing map:", error);
+      }
+    };
+    
+    // Create a polygon to represent the roof outline
+    const createRoofPolygon = (lat, lng) => {
+      console.log("Creating roof polygon for:", lat, lng);
+      
+      try {
+        // Simulate a roof outline around the given coordinates
+        const offset = 0.0003; // approximately 30 meters
+        
+        const polygonCoords = [
+          { lat: lat - offset, lng: lng - offset },
+          { lat: lat - offset, lng: lng + offset },
+          { lat: lat + offset, lng: lng + offset },
+          { lat: lat + offset, lng: lng - offset }
+        ];
+        
+        return new window.google.maps.Polygon({
+          paths: polygonCoords,
+          strokeColor: '#2563EB',
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          fillColor: '#2563EB',
+          fillOpacity: 0.35
+        });
+      } catch (error) {
+        console.error("Error creating roof polygon:", error);
+        return null;
+      }
+    };
+    
+    // Load the Google Maps script
+    loadGoogleMapsScript();
+    
+    // Cleanup
+    return () => {
+      // Clean up map resources if needed
+    };
   }, [formData.lat, formData.lng, formData.address]);
-  
-  // Create a polygon to represent the roof outline
-  const createRoofPolygon = (lat, lng) => {
-    // Simulate a roof outline around the given coordinates
-    const offset = 0.0003; // approximately 30 meters
-    
-    const polygonCoords = [
-      { lat: lat - offset, lng: lng - offset },
-      { lat: lat - offset, lng: lng + offset },
-      { lat: lat + offset, lng: lng + offset },
-      { lat: lat + offset, lng: lng - offset }
-    ];
-    
-    return new window.google.maps.Polygon({
-      paths: polygonCoords,
-      strokeColor: '#2563EB',
-      strokeOpacity: 0.8,
-      strokeWeight: 2,
-      fillColor: '#2563EB',
-      fillOpacity: 0.35
-    });
-  };
   
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
@@ -73,13 +146,18 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         ref={mapContainerRef} 
         className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden"
       >
-        {/* This will be replaced with the Google Maps satellite view */}
-        {(!window.google || !formData.lat) && (
+        {/* Loading indicator or fallback */}
+        {(!window.google || !formData.lat || !formData.lng) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Loading satellite imagery...</p>
           </div>
         )}
+        
+        <div className="absolute top-2 right-2 flex flex-col z-10">
+          <button type="button" onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) + 1)} className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1">+</button>
+          <button type="button" onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) - 1)} className="bg-white w-8 h-8 rounded shadow flex items-center justify-center">-</button>
+        </div>
         
         <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-10">
           <Ruler size={16} className="mr-1" /> Estimated roof outline
