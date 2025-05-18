@@ -5,8 +5,8 @@ import { formatNumber } from '../../utils/formatters';
 import GoogleMapContainer from '../map/GoogleMapContainer';
 import config from '../../config';
 import killSwitch from '../../killSwitch';
-import { debounce } from '../../utils/debounce'; // Make sure this path is correct
-import performanceMonitor from '../../utils/performance'; // Make sure this path is correct
+import { debounce } from '../../utils/debounce';
+import performanceMonitor from '../../utils/performance';
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const renderTime = performance.now();
@@ -23,19 +23,16 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     console.log("RoofSizeStep rendering with formData:", {
       lat: formData.lat,
       lng: formData.lng,
-      roofSize: formData.roofSize
+      roofSize: formData.roofSize,
+      initialRoofSize: formData.initialRoofSize,
+      roofPolygon: formData.roofPolygon ? "Present" : "None"
     });
     
     // Track component performance
     if (performanceMonitor && performanceMonitor.trackComponent) {
       performanceMonitor.trackComponent('RoofSizeStep', performance.now() - renderTime);
     }
-    
-    // Check memory usage occasionally
-    if (performanceMonitor && performanceMonitor.checkMemory) {
-      performanceMonitor.checkMemory();
-    }
-  }, [formData.lat, formData.lng, formData.roofSize, renderTime]);
+  }, [formData.lat, formData.lng, formData.roofSize, formData.initialRoofSize, formData.roofPolygon, renderTime]);
 
   // Create a debounced update function for roof size
   const debouncedUpdateRoofSize = useCallback(
@@ -104,41 +101,39 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize, updateFormData]);
 
-  // Handle polygon creation with fallback - optimized with useCallback
- // Fix for the handlePolygonCreated function in RoofSizeStep.js
-const handlePolygonCreated = useCallback((polygon, area) => {
-  console.log("Polygon created with area:", area);
-  
-  // IMPORTANT CHANGE: Only update the roof size if roofSizeAuto is true,
-  // AND if there's a significant difference from the backend value (>15%)
-  if (formData.roofSizeAuto) {
-    // Check if the calculated area is significantly different from the API value
-    const initialSize = formData.initialRoofSize || formData.roofSize;
+  // FIXED: Handle polygon creation consistently - always respect initial size
+  const handlePolygonCreated = useCallback((polygon, area) => {
+    console.log("Polygon created with area:", area);
     
-    if (initialSize) {
-      const percentDiff = Math.abs(area - initialSize) / initialSize;
+    // CRITICAL FIX: Always prefer the initial roof size from backend
+    // Never override with client-side calculations for consistency
+    if (formData.initialRoofSize) {
+      console.log("Using consistent roof size from backend:", formData.initialRoofSize);
       
-      if (percentDiff > 0.15) {
-        console.log("Polygon area differs significantly from API value, keeping API value");
-        // Preserve the backend measurement as it's likely more accurate
-      } else {
-        // The measurements are close enough, so we can use the polygon area
-        console.log("Updating roof size to match polygon area:", area);
-        updateFormData('roofSize', area);
+      if (formData.roofSize !== formData.initialRoofSize) {
+        updateFormData('roofSize', formData.initialRoofSize);
+        setLocalRoofSize(formData.initialRoofSize);
       }
-    } else {
-      // No initial size, just use the calculated area
-      console.log("Updating roof size to:", area);
+    } else if (area && formData.roofSizeAuto) {
+      // Only use calculated area if we don't have an initial value
+      console.log("Setting initial roof size to:", area);
       updateFormData('roofSize', area);
+      updateFormData('initialRoofSize', area); // Save as initial to maintain consistency
+      setLocalRoofSize(area);
     }
-  }
-}, [formData.roofSizeAuto, formData.initialRoofSize, formData.roofSize, updateFormData]);
+  }, [formData.initialRoofSize, formData.roofSize, formData.roofSizeAuto, updateFormData]);
 
   // Toggle automatic/manual size - optimized with useCallback
   const handleToggleAutoSize = useCallback((e) => {
     const isAuto = e.target.checked;
     updateFormData('roofSizeAuto', isAuto);
-  }, [updateFormData]);
+    
+    // Restore initial size if reverting to auto
+    if (isAuto && formData.initialRoofSize) {
+      updateFormData('roofSize', formData.initialRoofSize);
+      setLocalRoofSize(formData.initialRoofSize);
+    }
+  }, [formData.initialRoofSize, updateFormData]);
 
   // Handle manual roof size input - optimized with useCallback and local state
   const handleManualSizeChange = useCallback((e) => {
@@ -187,9 +182,11 @@ const handlePolygonCreated = useCallback((polygon, area) => {
       mapDisabled: mapDisabled,
       skipMap: skipMap,
       formDataRoofSize: formData.roofSize,
-      localRoofSize: localRoofSize
+      initialRoofSize: formData.initialRoofSize,
+      localRoofSize: localRoofSize,
+      hasRoofPolygon: !!formData.roofPolygon
     });
-  }, [mapDisabled, skipMap, formData.roofSize, localRoofSize]);
+  }, [mapDisabled, skipMap, formData.roofSize, formData.initialRoofSize, formData.roofPolygon, localRoofSize]);
 
   // Memoize coordinates for map
   const coordinates = useMemo(() => {
@@ -236,7 +233,7 @@ const handlePolygonCreated = useCallback((polygon, area) => {
         lat={coordinates.lat}
         lng={coordinates.lng}
         address={formData.address}
-        roofSize={formData.roofSize} // CRITICAL: Pass the backend roof size
+        roofSize={formData.initialRoofSize || formData.roofSize} // FIXED: Use initial size for consistency
         roofPolygon={formData.roofPolygon} // Pass the polygon coordinates from backend
         onMapReady={handleMapReady}
         onMapError={handleMapError}
@@ -244,8 +241,9 @@ const handlePolygonCreated = useCallback((polygon, area) => {
       />
     );
   }, [
-    coordinates, skipMap, mapDisabled, formData.address, formData.roofSize,
-    handleMapReady, handleMapError, handlePolygonCreated, killSwitch
+    coordinates, skipMap, mapDisabled, formData.address, formData.initialRoofSize, 
+    formData.roofSize, formData.roofPolygon, handleMapReady, handleMapError, 
+    handlePolygonCreated, killSwitch
   ]);
 
   return (
