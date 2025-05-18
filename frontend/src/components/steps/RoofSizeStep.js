@@ -1,5 +1,5 @@
 // src/components/steps/RoofSizeStep.js
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
 import GoogleMapContainer from '../map/GoogleMapContainer';
@@ -7,30 +7,17 @@ import GoogleMapContainer from '../map/GoogleMapContainer';
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [calculatedArea, setCalculatedArea] = useState(null);
-  const [showManualEntry, setShowManualEntry] = useState(!formData.roofSizeAuto);
   const mapContainerRef = useRef(null);
-
-  // Debug: Log prop changes
-  useEffect(() => {
-    console.log("RoofSizeStep formData:", {
-      lat: formData.lat,
-      lng: formData.lng,
-      roofSize: formData.roofSize,
-      address: formData.address
-    });
-  }, [formData]);
-
-  // Update roof size with calculated value if auto is enabled
-  useEffect(() => {
-    if (calculatedArea && formData.roofSizeAuto) {
-      updateFormData('roofSize', calculatedArea);
-    }
-  }, [calculatedArea, formData.roofSizeAuto, updateFormData]);
+  
+  console.log("RoofSizeStep rendering with formData:", {
+    lat: formData.lat,
+    lng: formData.lng,
+    roofSize: formData.roofSize
+  });
 
   // Handle map events
-  const handleMapReady = (mapInstance) => {
-    console.log("Map ready:", !!mapInstance);
+  const handleMapReady = () => {
+    console.log("Map ready event received");
     setLoading(false);
   };
 
@@ -40,40 +27,41 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     setLoading(false);
   };
 
-  // Handle polygon creation and area calculation
+  // Handle polygon creation with fallback
   const handlePolygonCreated = (polygon, area) => {
     console.log("Polygon created with area:", area);
-    if (area && !isNaN(area)) {
-      setCalculatedArea(area);
-      if (formData.roofSizeAuto) {
-        updateFormData('roofSize', area);
-      }
+    
+    if (formData.roofSizeAuto) {
+      const areaValue = area || formData.roofSize || 2500;
+      console.log("Updating roof size to:", areaValue);
+      updateFormData('roofSize', areaValue);
     }
   };
 
-  // Toggle automatic vs manual size
+  // Toggle automatic/manual size
   const handleToggleAutoSize = (e) => {
     const isAuto = e.target.checked;
     updateFormData('roofSizeAuto', isAuto);
-    setShowManualEntry(!isAuto);
-    
-    // If turning on auto calculation and we have a calculated area, use it
-    if (isAuto && calculatedArea) {
-      updateFormData('roofSize', calculatedArea);
-    }
   };
 
   // Handle manual roof size input
   const handleManualSizeChange = (e) => {
     const value = parseInt(e.target.value, 10);
-    updateFormData('roofSize', isNaN(value) ? '' : value);
+    if (!isNaN(value) && value > 0) {
+      updateFormData('roofSize', value);
+    }
   };
 
-  // Check if coordinates are valid
+  // Check if we have valid coordinates
   const hasValidCoordinates = () => {
-    const lat = parseFloat(formData.lat);
-    const lng = parseFloat(formData.lng);
-    return !isNaN(lat) && !isNaN(lng);
+    try {
+      const lat = parseFloat(formData.lat);
+      const lng = parseFloat(formData.lng);
+      return !isNaN(lat) && !isNaN(lng);
+    } catch (e) {
+      console.error("Error parsing coordinates:", e);
+      return false;
+    }
   };
 
   return (
@@ -83,14 +71,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       
       {/* Map Container with Satellite View */}
       <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
-        {/* Only render the map if we have valid coordinates */}
         {hasValidCoordinates() ? (
           <GoogleMapContainer
             ref={mapContainerRef}
-            lat={parseFloat(formData.lat)}
-            lng={parseFloat(formData.lng)}
+            lat={formData.lat}
+            lng={formData.lng}
             address={formData.address}
-            enableDrawing={true}
             onMapReady={handleMapReady}
             onMapError={handleMapError}
             onPolygonCreated={handlePolygonCreated}
@@ -100,31 +86,30 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             <Camera size={40} className="mb-2 text-gray-400" />
             <p className="text-gray-500">No coordinates available</p>
             <p className="text-xs text-gray-400 mt-2">
-              Coordinates: {JSON.stringify({lat: formData.lat, lng: formData.lng})}
+              {JSON.stringify({lat: formData.lat, lng: formData.lng})}
             </p>
           </div>
         )}
         
-        {/* Loading or error overlay */}
-        {hasValidCoordinates() && (loading || error) && (
+        {/* Loading overlay */}
+        {hasValidCoordinates() && loading && !error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
-            {error ? (
-              <>
-                <Camera size={40} className="mb-2" />
-                <p className="text-sm text-red-500">{error}</p>
-                <p className="text-xs mt-1">Using estimated roof size</p>
-              </>
-            ) : (
-              <>
-                <Camera size={40} className="mb-2" />
-                <p className="text-sm">Loading satellite imagery...</p>
-              </>
-            )}
+            <Camera size={40} className="mb-2" />
+            <p className="text-sm">Loading satellite imagery...</p>
+          </div>
+        )}
+        
+        {/* Error overlay */}
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 z-10 bg-white bg-opacity-70">
+            <Camera size={40} className="mb-2" />
+            <p className="text-sm">Error: {error}</p>
+            <p className="text-xs mt-1">Using estimated roof size</p>
           </div>
         )}
 
         {/* Zoom controls */}
-        {hasValidCoordinates() && (
+        {hasValidCoordinates() && !loading && (
           <div className="absolute top-2 right-2 flex flex-col z-20">
             <button
               type="button"
@@ -143,7 +128,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </div>
         )}
 
-        {hasValidCoordinates() && (
+        {hasValidCoordinates() && !loading && (
           <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
             <Ruler size={16} className="mr-1" /> Estimated roof outline
           </div>
@@ -161,7 +146,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
         
         <p className="text-sm text-gray-600 mb-3">
-          Our AI analyzed your roof using satellite imagery. You can also draw your roof outline manually for better accuracy.
+          Our AI analyzed your roof using satellite imagery. You can also enter the size manually.
         </p>
 
         {/* Auto/Manual Toggle */}
@@ -177,21 +162,20 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </label>
         </div>
 
-        {/* Manual Size Entry */}
-        {showManualEntry && (
-          <div className="mt-3">
-            <label className="block text-sm font-medium mb-1">Manually enter roof size</label>
-            <input
-              type="number"
-              value={formData.roofSize || ''}
-              onChange={handleManualSizeChange}
-              placeholder="Size in square feet"
-              min="500"
-              max="10000"
-              className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-primary-300 focus:border-primary-500 focus:outline-none"
-            />
-          </div>
-        )}
+        {/* Manual Size Entry (always visible) */}
+        <div className="mt-3">
+          <label className="block text-sm font-medium mb-1">Enter roof size manually</label>
+          <input
+            type="number"
+            value={formData.roofSize || ''}
+            onChange={handleManualSizeChange}
+            disabled={formData.roofSizeAuto}
+            placeholder="Size in square feet"
+            min="500"
+            max="10000"
+            className={`w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-primary-300 focus:border-primary-500 focus:outline-none ${formData.roofSizeAuto ? 'bg-gray-100' : ''}`}
+          />
+        </div>
       </div>
 
       {/* Navigation Buttons */}
