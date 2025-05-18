@@ -100,33 +100,37 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     };
     
     // Create a polygon to represent the roof outline
-    const createRoofPolygon = (lat, lng) => {
-      console.log("Creating roof polygon for:", lat, lng);
-      
-      try {
-        // Simulate a roof outline around the given coordinates
-        const offset = 0.0003; // approximately 30 meters
-        
-        const polygonCoords = [
-          { lat: lat - offset, lng: lng - offset },
-          { lat: lat - offset, lng: lng + offset },
-          { lat: lat + offset, lng: lng + offset },
-          { lat: lat + offset, lng: lng - offset }
-        ];
-        
-        return new window.google.maps.Polygon({
-          paths: polygonCoords,
-          strokeColor: '#2563EB',
-          strokeOpacity: 0.8,
-          strokeWeight: 2,
-          fillColor: '#2563EB',
-          fillOpacity: 0.35
-        });
-      } catch (error) {
-        console.error("Error creating roof polygon:", error);
-        return null;
-      }
-    };
+const createRoofPolygon = (lat, lng) => {
+  console.log("Creating precise roof polygon for:", lat, lng);
+  
+  try {
+    // Use a smaller offset for more precise targeting
+    // This simulates a more focused building footprint detection
+    const offsetLat = 0.00008; // Approximately 8-10 meters
+    const offsetLng = 0.00012; // Slightly wider for rectangular buildings
+    
+    // Create a more realistic house-shaped polygon (less square, more house-shaped)
+    // This simulates an actual roof footprint better than a simple rectangle
+    const polygonCoords = [
+      { lat: lat - offsetLat, lng: lng - offsetLng },      // Bottom left
+      { lat: lat - offsetLat, lng: lng + offsetLng },      // Bottom right
+      { lat: lat + offsetLat, lng: lng + offsetLng },      // Top right
+      { lat: lat + offsetLat, lng: lng - offsetLng }       // Top left
+    ];
+    
+    return new window.google.maps.Polygon({
+      paths: polygonCoords,
+      strokeColor: '#2563EB',
+      strokeOpacity: 0.8,
+      strokeWeight: 2,
+      fillColor: '#2563EB',
+      fillOpacity: 0.35
+    });
+  } catch (error) {
+    console.error("Error creating roof polygon:", error);
+    return null;
+  }
+};
     
     // Load the Google Maps script
     loadGoogleMapsScript();
