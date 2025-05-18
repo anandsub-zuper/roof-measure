@@ -11,6 +11,16 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [showManualEntry, setShowManualEntry] = useState(!formData.roofSizeAuto);
   const mapContainerRef = useRef(null);
 
+  // Debug: Log prop changes
+  useEffect(() => {
+    console.log("RoofSizeStep formData:", {
+      lat: formData.lat,
+      lng: formData.lng,
+      roofSize: formData.roofSize,
+      address: formData.address
+    });
+  }, [formData]);
+
   // Update roof size with calculated value if auto is enabled
   useEffect(() => {
     if (calculatedArea && formData.roofSizeAuto) {
@@ -19,7 +29,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   }, [calculatedArea, formData.roofSizeAuto, updateFormData]);
 
   // Handle map events
-  const handleMapReady = () => {
+  const handleMapReady = (mapInstance) => {
+    console.log("Map ready:", !!mapInstance);
     setLoading(false);
   };
 
@@ -58,6 +69,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     updateFormData('roofSize', isNaN(value) ? '' : value);
   };
 
+  // Check if coordinates are valid
+  const hasValidCoordinates = () => {
+    const lat = parseFloat(formData.lat);
+    const lng = parseFloat(formData.lng);
+    return !isNaN(lat) && !isNaN(lng);
+  };
+
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
@@ -65,12 +83,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       
       {/* Map Container with Satellite View */}
       <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
-        {/* Only render the map if we have coordinates */}
-        {formData.lat && formData.lng ? (
+        {/* Only render the map if we have valid coordinates */}
+        {hasValidCoordinates() ? (
           <GoogleMapContainer
             ref={mapContainerRef}
-            lat={formData.lat}
-            lng={formData.lng}
+            lat={parseFloat(formData.lat)}
+            lng={parseFloat(formData.lng)}
             address={formData.address}
             enableDrawing={true}
             onMapReady={handleMapReady}
@@ -78,13 +96,17 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             onPolygonCreated={handlePolygonCreated}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-            <p>No coordinates available</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
+            <Camera size={40} className="mb-2 text-gray-400" />
+            <p className="text-gray-500">No coordinates available</p>
+            <p className="text-xs text-gray-400 mt-2">
+              Coordinates: {JSON.stringify({lat: formData.lat, lng: formData.lng})}
+            </p>
           </div>
         )}
         
         {/* Loading or error overlay */}
-        {(loading || error) && (
+        {hasValidCoordinates() && (loading || error) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
             {error ? (
               <>
@@ -102,26 +124,30 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         )}
 
         {/* Zoom controls */}
-        <div className="absolute top-2 right-2 flex flex-col z-20">
-          <button
-            type="button"
-            onClick={() => mapContainerRef.current?.zoomIn()}
-            className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
-          >
-            +
-          </button>
-          <button
-            type="button"
-            onClick={() => mapContainerRef.current?.zoomOut()}
-            className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
-          >
-            -
-          </button>
-        </div>
+        {hasValidCoordinates() && (
+          <div className="absolute top-2 right-2 flex flex-col z-20">
+            <button
+              type="button"
+              onClick={() => mapContainerRef.current?.zoomIn?.()}
+              className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => mapContainerRef.current?.zoomOut?.()}
+              className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
+            >
+              -
+            </button>
+          </div>
+        )}
 
-        <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
-          <Ruler size={16} className="mr-1" /> Estimated roof outline
-        </div>
+        {hasValidCoordinates() && (
+          <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
+            <Ruler size={16} className="mr-1" /> Estimated roof outline
+          </div>
+        )}
       </div>
 
       {/* Roof Size Information */}
@@ -178,8 +204,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </button>
         <button
           onClick={nextStep}
-          disabled={!formData.roofSize}
-          className="bg-primary-600 text-white py-2 px-8 rounded-lg hover:bg-primary-700 flex items-center transition-colors disabled:bg-gray-400"
+          className="bg-primary-600 text-white py-2 px-8 rounded-lg hover:bg-primary-700 flex items-center transition-colors"
         >
           Continue <ChevronRight size={16} className="ml-1" />
         </button>
