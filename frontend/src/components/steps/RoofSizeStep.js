@@ -48,6 +48,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   // Initialize Google Maps with satellite view
   useEffect(() => {
     let map;
+    let placesService;
+
     const loadGoogleMapsScript = () => {
       if (window.google && window.google.maps) {
         initMap();
@@ -113,12 +115,18 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
         mapRef.current = map;
 
-        // Try to get actual building footprint
-        const service = new window.google.maps.places.PlacesService(map);
-        service.findPlaceFromQuery({
+        // Initialize Places API with the new recommended approach
+        placesService = new window.google.maps.places.PlacesService(map);
+
+        // Create a request for place search
+        const request = {
           query: formData.address,
-          fields: ['geometry']
-        }, (results, status) => {
+          fields: ['geometry'],
+          locationBias: { lat, lng },
+        };
+
+        // Use the new findPlaceFromQuery method
+        placesService.findPlaceFromQuery(request, (results, status) => {
           let polygonCoords;
           
           if (status === 'OK' && results[0]?.geometry?.viewport) {
@@ -151,8 +159,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     loadGoogleMapsScript();
 
     return () => {
+      // Clean up map and places service
       if (map) {
         window.google.maps.event.clearInstanceListeners(map);
+      }
+      if (roofPolygonRef.current) {
+        roofPolygonRef.current.setMap(null);
       }
     };
   }, [formData.lat, formData.lng, formData.address]);
