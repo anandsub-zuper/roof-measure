@@ -48,7 +48,7 @@ const generateRoofEstimate = async (data) => {
   try {
     // Construct prompt for OpenAI
     const prompt = `
-      Generate a detailed roofing cost estimate with the following parameters:
+ Generate a detailed roofing cost estimate with the following parameters:
       - Roof size: ${data.roofSize} square feet
       - Roof steepness: ${data.roofSteepness}
       - Desired material: ${data.desiredRoofMaterial}
@@ -58,7 +58,25 @@ const generateRoofEstimate = async (data) => {
       - Timeline: ${data.timeline || 'Not specified'}
       - Financing preferences: ${data.financing || 'Not specified'}
       
-      Provide a complete estimate including:
+      IMPORTANT PRICE GUIDANCE (Use these ranges for accuracy):
+      - Asphalt shingles: $4-7/sq ft for materials, $7-15/sq ft installed total
+      - Metal roofing: $7-12/sq ft for materials, $12-25/sq ft installed total
+      - Tile: $10-15/sq ft for materials, $15-30/sq ft installed total
+      - Cedar shakes: $6-10/sq ft for materials, $12-22/sq ft installed total
+      
+      Regional adjustment factors:
+      - West Coast (WA, OR, CA): +10-15% above national average
+      - Northeast (NY, MA, CT): +5-10% above national average
+      - Midwest: -5% below national average
+      - South: -10% below national average
+      
+      Typical cost breakdown percentages:
+      - Materials: 35-45% of total cost
+      - Labor: 40-50% of total cost
+      - Removal & Disposal: 10-15% of total cost
+      - Permits & Overhead: 5-10% of total cost
+      
+      Please provide a complete estimate including:
       1. Total cost range (low, average, high)
       2. Cost breakdown by category (materials, labor, removal, etc.)
       3. Price per square foot
