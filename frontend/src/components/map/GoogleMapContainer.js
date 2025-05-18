@@ -1,6 +1,7 @@
-// src/components/map/GoogleMapContainer.js with forwardRef for proper ref handling
-
+// src/components/map/GoogleMapContainer.js - Updated with backend-based OpenAI Vision
 import React, { useEffect, forwardRef, useImperativeHandle } from 'react';
+import { analyzeRoofImage } from '../../services/openAIService';
+import { captureMapImage } from '../../utils/imageUtils';
 
 // This component creates a completely isolated container for Google Maps
 // to prevent React from trying to manage its DOM
@@ -15,6 +16,7 @@ const GoogleMapContainer = forwardRef(({
   let mapInstanceRef = null;
   let polygonRef = null;
   let mapInitialized = false;
+  let captureTimeout = null;
 
   // Methods to control the map from outside
   const zoomIn = () => {
@@ -129,83 +131,82 @@ const GoogleMapContainer = forwardRef(({
           // Notify parent that map is ready
           onMapReady && onMapReady(mapInstance);
 
-          // Try to create the roof polygon
-          createRoofPolygon(mapInstance, parsedLat, parsedLng, address);
+          // Wait for the map to be fully loaded and stabilized before capturing
+          captureTimeout = setTimeout(() => {
+            // Try to create the roof polygon using OpenAI Vision
+            createRoofPolygonWithAI(mapInstance, parsedLat, parsedLng, address);
+          }, 2000);
         } catch (error) {
           console.error("Error initializing map:", error);
           onMapError && onMapError("Error initializing map");
         }
       };
 
-      // Create roof polygon - either from Places API or fallback to estimation
-      const createRoofPolygon = (mapInstance, lat, lng, address) => {
-        // Helper to create polygon from coordinates
-        const createPolygon = (coords) => {
-          if (!window.google?.maps) return null;
+      // Create roof polygon using OpenAI Vision API (via backend)
+      const createRoofPolygonWithAI = async (mapInstance, lat, lng, address) => {
+        try {
+          // First, capture the map as an image
+          const imageBase64 = await captureMapImage(mapInstance);
           
-          // Ensure coordinates are valid Google Maps LatLng objects
-          const validCoords = coords.map(coord => {
-            if (typeof coord.lat === 'function') {
-              // Already a LatLng object
-              return coord;
-            } else {
-              // Create new LatLng object
-              return new window.google.maps.LatLng(coord.lat, coord.lng);
-            }
-          });
+          // Then analyze the image with OpenAI Vision (through our backend)
+          const coordinates = await analyzeRoofImage(imageBase64);
           
-          // Create the polygon with stronger visual styling
-          const polygon = new window.google.maps.Polygon({
-            paths: validCoords,
-            strokeColor: '#2563EB', // Blue outline
-            strokeOpacity: 1.0,     // Fully opaque
-            strokeWeight: 3,        // Thicker line
-            fillColor: '#2563EB',   // Blue fill
-            fillOpacity: 0.4,       // Semi-transparent
-            zIndex: 100,
-            map: mapInstance
-          });
-          
-          // Save the polygon reference
-          polygonRef = polygon;
-          
-          // Calculate square footage and pass with the polygon
-          const area = calculatePolygonArea(validCoords);
-          
-          if (onPolygonCreated) {
-            onPolygonCreated(polygon, area);
+          if (coordinates && coordinates.length >= 3) {
+            // Create polygon with AI-detected coordinates
+            createPolygon(coordinates);
+          } else {
+            // Fall back to traditional methods if AI detection fails
+            createRoofPolygon(mapInstance, lat, lng, address);
           }
-          
-          return polygon;
-        };
-        
-        // Calculate area in square feet for a polygon
-        const calculatePolygonArea = (latLngCoords) => {
-          if (!window.google?.maps?.geometry?.spherical) {
-            console.warn("Google Maps Geometry library not available for area calculation");
-            return 2500; // Default fallback area (sq ft)
-          }
-          
-          try {
-            // Calculate area in square meters
-            const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords);
-            
-            // Convert to square feet (1 sq meter = 10.7639 sq feet)
-            const areaInSquareFeet = areaInSquareMeters * 10.7639;
-            
-            // Apply a roof steepness factor (estimated)
-            // Assuming average roof is ~20-30% steeper than the flat projection
-            const steepnessFactor = 1.25;
-            
-            // Round to the nearest whole number
-            return Math.round(areaInSquareFeet * steepnessFactor);
-          } catch (error) {
-            console.error("Error calculating area:", error);
-            return 2500; // Default fallback area (sq ft)
-          }
-        };
+        } catch (error) {
+          console.error("Error with AI roof detection:", error);
+          // Fall back to traditional methods
+          createRoofPolygon(mapInstance, lat, lng, address);
+        }
+      };
 
-        // Create a polygon - try Places API first, then fallback to estimation
+      // Helper to create polygon from coordinates
+      const createPolygon = (coords) => {
+        if (!window.google?.maps) return null;
+        
+        // Ensure coordinates are valid Google Maps LatLng objects
+        const validCoords = coords.map(coord => {
+          if (typeof coord.lat === 'function') {
+            // Already a LatLng object
+            return coord;
+          } else {
+            // Create new LatLng object
+            return new window.google.maps.LatLng(coord.lat, coord.lng);
+          }
+        });
+        
+        // Create the polygon with stronger visual styling
+        const polygon = new window.google.maps.Polygon({
+          paths: validCoords,
+          strokeColor: '#2563EB', // Blue outline
+          strokeOpacity: 1.0,     // Fully opaque
+          strokeWeight: 3,        // Thicker line
+          fillColor: '#2563EB',   // Blue fill
+          fillOpacity: 0.4,       // Semi-transparent
+          zIndex: 100,
+          map: mapInstance
+        });
+        
+        // Save the polygon reference
+        polygonRef = polygon;
+        
+        // Calculate square footage and pass with the polygon
+        const area = calculatePolygonArea(validCoords);
+        
+        if (onPolygonCreated) {
+          onPolygonCreated(polygon, area);
+        }
+        
+        return polygon;
+      };
+
+      // Original fallback method for roof polygon creation
+      const createRoofPolygon = (mapInstance, lat, lng, address) => {
         try {
           if (window.google?.maps?.places) {
             // Try using Places API
@@ -256,6 +257,56 @@ const GoogleMapContainer = forwardRef(({
           onMapError && onMapError("Error creating roof outline");
         }
       };
+        
+      // Calculate area in square feet for a polygon
+      const calculatePolygonArea = (latLngCoords) => {
+        if (!window.google?.maps?.geometry?.spherical) {
+          console.warn("Google Maps Geometry library not available for area calculation");
+          return 2500; // Default fallback area (sq ft)
+        }
+        
+        try {
+          // Calculate area in square meters
+          const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords);
+          
+          // Convert to square feet (1 sq meter = 10.7639 sq feet)
+          const areaInSquareFeet = areaInSquareMeters * 10.7639;
+          
+          // Apply a roof steepness factor based on building type and region
+          const steepnessFactor = getRegionalSteepnessFactor(address);
+          
+          // Round to the nearest whole number
+          return Math.round(areaInSquareFeet * steepnessFactor);
+        } catch (error) {
+          console.error("Error calculating area:", error);
+          return 2500; // Default fallback area (sq ft)
+        }
+      };
+
+      // Estimate steepness factor based on region/address
+      const getRegionalSteepnessFactor = (address) => {
+        // Basic regional estimation - could be enhanced with more detailed analysis
+        const addressLower = address.toLowerCase();
+        
+        // Regions with steeper roofs due to snow
+        if (addressLower.includes('alaska') || 
+            addressLower.includes('montana') || 
+            addressLower.includes('minnesota') ||
+            addressLower.includes('maine') ||
+            addressLower.includes('vermont')) {
+          return 1.35; // Steeper roofs for snow regions
+        }
+        
+        // Flat roof regions
+        if (addressLower.includes('arizona') || 
+            addressLower.includes('nevada') || 
+            addressLower.includes('new mexico')) {
+          return 1.1; // Flatter roofs in desert areas
+        }
+        
+        // Default factor for other regions
+        return 1.25;
+      };
 
       // Create estimated polygon based on lat/lng
       const createEstimatedPolygon = (lat, lng) => {
@@ -293,6 +344,10 @@ const GoogleMapContainer = forwardRef(({
 
     // Clean up function
     return () => {
+      if (captureTimeout) {
+        clearTimeout(captureTimeout);
+      }
+      
       if (polygonRef) {
         polygonRef.setMap(null);
         polygonRef = null;
