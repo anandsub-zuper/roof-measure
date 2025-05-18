@@ -1,8 +1,9 @@
-// src/components/steps/RoofSizeStep.js
+// src/components/steps/RoofSizeStep.js - With property data integration
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Ruler, Camera, ChevronLeft, ChevronRight, Building } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
-import GoogleMapContainer from '../map/GoogleMapContainer';
+import EnhancedGoogleMapContainer from '../map/EnhancedGoogleMapContainer';
 import config from '../../config';
 import killSwitch from '../../killSwitch';
 import { debounce } from '../../utils/debounce';
@@ -18,6 +19,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const mapContainerRef = useRef(null);
   const prevSizeRef = useRef(formData.roofSize);
   
+  // Display property data if available
+  const hasPropertyData = !!formData.propertyData;
+  const propertyType = formData.propertyData?.propertyType || 'Unknown';
+  const buildingSize = formData.propertyData?.buildingSize || null;
+  const stories = formData.propertyData?.stories || null;
+  
   // Debug logging
   useEffect(() => {
     console.log("RoofSizeStep rendering with formData:", {
@@ -25,14 +32,16 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       lng: formData.lng,
       roofSize: formData.roofSize,
       initialRoofSize: formData.initialRoofSize,
-      roofPolygon: formData.roofPolygon ? "Present" : "None"
+      roofPolygon: formData.roofPolygon ? "Present" : "None",
+      propertyData: formData.propertyData ? "Available" : "None"
     });
     
     // Track component performance
     if (performanceMonitor && performanceMonitor.trackComponent) {
       performanceMonitor.trackComponent('RoofSizeStep', performance.now() - renderTime);
     }
-  }, [formData.lat, formData.lng, formData.roofSize, formData.initialRoofSize, formData.roofPolygon, renderTime]);
+  }, [formData.lat, formData.lng, formData.roofSize, formData.initialRoofSize, 
+      formData.roofPolygon, formData.propertyData, renderTime]);
 
   // Create a debounced update function for roof size
   const debouncedUpdateRoofSize = useCallback(
@@ -101,41 +110,52 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize, updateFormData]);
 
-  // FIXED: Handle polygon creation consistently - always respect initial size
+  // Handle polygon creation - respect property data
   const handlePolygonCreated = useCallback((polygon, area) => {
     console.log("Polygon created with area:", area);
     
-    // CRITICAL FIX: Always prefer the initial roof size from backend
-    // Never override with client-side calculations for consistency
-    if (formData.initialRoofSize) {
-      console.log("Using consistent roof size from backend:", formData.initialRoofSize);
+    // If we have property data with building size, prioritize calculated roof size
+    if (formData.propertyData?.buildingSize && formData.roofSizeAuto) {
+      console.log("Using roof size from property data");
       
+      // Update only if different to avoid loops
       if (formData.roofSize !== formData.initialRoofSize) {
         updateFormData('roofSize', formData.initialRoofSize);
         setLocalRoofSize(formData.initialRoofSize);
       }
     } else if (area && formData.roofSizeAuto) {
-      // Only use calculated area if we don't have an initial value
-      console.log("Setting initial roof size to:", area);
-      updateFormData('roofSize', area);
-      updateFormData('initialRoofSize', area); // Save as initial to maintain consistency
-      setLocalRoofSize(area);
+      // Only use calculated area if we don't have property data
+      console.log("Setting roof size to:", area);
+      
+      // Store calculated area if different
+      if (formData.roofSize !== area) {
+        updateFormData('roofSize', area);
+        setLocalRoofSize(area);
+      }
     }
-  }, [formData.initialRoofSize, formData.roofSize, formData.roofSizeAuto, updateFormData]);
+  }, [formData.initialRoofSize, formData.propertyData, 
+      formData.roofSize, formData.roofSizeAuto, updateFormData]);
 
-  // Toggle automatic/manual size - optimized with useCallback
+  // Toggle automatic/manual size
   const handleToggleAutoSize = useCallback((e) => {
     const isAuto = e.target.checked;
     updateFormData('roofSizeAuto', isAuto);
     
-    // Restore initial size if reverting to auto
-    if (isAuto && formData.initialRoofSize) {
-      updateFormData('roofSize', formData.initialRoofSize);
-      setLocalRoofSize(formData.initialRoofSize);
+    // Restore initial size or property-based size if reverting to auto
+    if (isAuto) {
+      if (formData.propertyData?.buildingSize) {
+        console.log("Restoring property-based roof size");
+        updateFormData('roofSize', formData.initialRoofSize);
+        setLocalRoofSize(formData.initialRoofSize);
+      } else if (formData.initialRoofSize) {
+        console.log("Restoring initial roof size");
+        updateFormData('roofSize', formData.initialRoofSize);
+        setLocalRoofSize(formData.initialRoofSize);
+      }
     }
-  }, [formData.initialRoofSize, updateFormData]);
+  }, [formData.initialRoofSize, formData.propertyData, updateFormData]);
 
-  // Handle manual roof size input - optimized with useCallback and local state
+  // Handle manual roof size input
   const handleManualSizeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     if (!isNaN(value) && value > 0) {
@@ -149,7 +169,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSizeAuto, debouncedUpdateRoofSize]);
 
-  // Check if we have valid coordinates - optimized with useCallback
+  // Check if we have valid coordinates
   const hasValidCoordinates = useCallback(() => {
     try {
       const lat = parseFloat(formData.lat);
@@ -184,9 +204,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       formDataRoofSize: formData.roofSize,
       initialRoofSize: formData.initialRoofSize,
       localRoofSize: localRoofSize,
-      hasRoofPolygon: !!formData.roofPolygon
+      hasRoofPolygon: !!formData.roofPolygon,
+      hasPropertyData: !!formData.propertyData,
+      propertyType: formData.propertyData?.propertyType || 'Unknown'
     });
-  }, [mapDisabled, skipMap, formData.roofSize, formData.initialRoofSize, formData.roofPolygon, localRoofSize]);
+  }, [mapDisabled, skipMap, formData.roofSize, formData.initialRoofSize,
+      formData.roofPolygon, formData.propertyData, localRoofSize]);
 
   // Memoize coordinates for map
   const coordinates = useMemo(() => {
@@ -199,7 +222,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     return null;
   }, [formData.lat, formData.lng, hasValidCoordinates]);
 
-  // Determine which map component to render - wrapped in useMemo
+  // Determine which map component to render
   const mapComponent = useMemo(() => {
     if (!coordinates) {
       return (
@@ -228,13 +251,14 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
     
     return (
-      <GoogleMapContainer
+      <EnhancedGoogleMapContainer
         ref={mapContainerRef}
         lat={coordinates.lat}
         lng={coordinates.lng}
         address={formData.address}
-        roofSize={formData.initialRoofSize || formData.roofSize} // FIXED: Use initial size for consistency
-        roofPolygon={formData.roofPolygon} // Pass the polygon coordinates from backend
+        roofSize={formData.initialRoofSize || formData.roofSize}
+        roofPolygon={formData.roofPolygon}
+        propertyData={formData.propertyData} // Pass property data to map
         onMapReady={handleMapReady}
         onMapError={handleMapError}
         onPolygonCreated={handlePolygonCreated}
@@ -242,14 +266,23 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     );
   }, [
     coordinates, skipMap, mapDisabled, formData.address, formData.initialRoofSize, 
-    formData.roofSize, formData.roofPolygon, handleMapReady, handleMapError, 
-    handlePolygonCreated, killSwitch
+    formData.roofSize, formData.roofPolygon, formData.propertyData, handleMapReady, 
+    handleMapError, handlePolygonCreated, killSwitch
   ]);
 
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
       <p className="text-sm text-gray-600 mb-4">{formData.address}</p>
+      
+      {/* Property Data Badge - Show if available */}
+      {hasPropertyData && (
+        <div className="mb-4 bg-green-50 text-green-800 px-3 py-1 rounded-full text-xs flex items-center">
+          <Building size={14} className="mr-1" />
+          {propertyType} {stories && `• ${stories} ${stories === 1 ? 'story' : 'stories'}`}
+          {buildingSize && ` • ${formatNumber(buildingSize)} sq ft building`}
+        </div>
+      )}
       
       {/* Debug button - only in development */}
       {process.env.NODE_ENV === 'development' && (
@@ -288,32 +321,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             <p className="text-xs mt-1">Using estimated roof size</p>
           </div>
         )}
-
-        {/* Zoom controls - only show when map is loaded and visible */}
-        {coordinates && !loading && !skipMap && !mapDisabled && !error && !(killSwitch && killSwitch.googleMaps) && (
-          <div className="absolute top-2 right-2 flex flex-col z-20">
-            <button
-              type="button"
-              onClick={() => mapContainerRef.current?.zoomIn?.()}
-              className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              onClick={() => mapContainerRef.current?.zoomOut?.()}
-              className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
-            >
-              -
-            </button>
-          </div>
-        )}
-
-        {coordinates && !loading && !skipMap && !mapDisabled && !error && !(killSwitch && killSwitch.googleMaps) && (
-          <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
-            <Ruler size={16} className="mr-1" /> Estimated roof outline
-          </div>
-        )}
       </div>
 
       {/* Roof Size Information */}
@@ -327,9 +334,11 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
         
         <p className="text-sm text-gray-600 mb-3">
-          {skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? 
-            "Using estimated roof size based on property data." : 
-            "Our AI analyzed your roof using satellite imagery."}
+          {hasPropertyData ? 
+            "Based on property records and satellite imagery." : 
+            (skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? 
+              "Using estimated roof size based on property data." : 
+              "Our AI analyzed your roof using satellite imagery.")}
           {" You can also enter the size manually."}
         </p>
 
@@ -342,7 +351,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               onChange={handleToggleAutoSize}
               className="mr-2 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
             />
-            Use {skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? "estimated" : "AI-calculated"} size (recommended)
+            Use {hasPropertyData ? "property-based" : (skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? "estimated" : "AI-calculated")} size (recommended)
           </label>
         </div>
 
