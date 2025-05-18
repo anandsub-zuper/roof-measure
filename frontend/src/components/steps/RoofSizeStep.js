@@ -22,6 +22,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   }, []);
 
   const createPolygon = useCallback((coords, map) => {
+    if (!window.google?.maps) return null;
+    
     return new window.google.maps.Polygon({
       paths: coords,
       strokeColor: '#2563EB',
@@ -45,8 +47,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   }, [metersToDegrees]);
 
   useEffect(() => {
-    let mapInstance;
-    let placesService;
+    let mapInstance = null;
+    let placesService = null;
 
     const loadGoogleMapsScript = () => {
       if (window.google && window.google.maps) {
@@ -96,6 +98,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         const lat = parseFloat(formData.lat);
         const lng = parseFloat(formData.lng);
 
+        // Create map instance
         mapInstance = new window.google.maps.Map(mapContainerRef.current, {
           center: { lat, lng },
           zoom: 19,
@@ -112,40 +115,65 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
         mapRef.current = mapInstance;
 
-        placesService = new window.google.maps.places.PlacesService(mapInstance);
-        console.warn("Using google.maps.places.PlacesService which is deprecated for new customers as of March 1st, 2025. Please consider migrating to the new Places API (New). See https://developers.google.com/maps/legacy and https://developers.google.com/maps/documentation/javascript/places-migration-overview for more information.");
+        // Try to use Places API to get a more accurate outline
+        try {
+          if (window.google?.maps?.places) {
+            placesService = new window.google.maps.places.PlacesService(mapInstance);
+            
+            // Deprecated API warning (handled safely)
+            console.warn("Using google.maps.places.PlacesService which is deprecated for new customers as of March 1st, 2025. Please consider migrating to the new Places API (New).");
+            
+            const request = {
+              query: formData.address,
+              fields: ['geometry'],
+              locationBias: { lat, lng },
+            };
 
-        const request = {
-          query: formData.address,
-          fields: ['geometry'],
-          locationBias: { lat, lng },
-        };
+            placesService.findPlaceFromQuery(request, (results, status) => {
+              if (!isMounted.current) return;
 
-        placesService.findPlaceFromQuery(request, (results, status) => {
-          if (!isMounted.current) return;
+              let polygon;
+              let polygonCoords;
 
-          let polygon;
-          let polygonCoords;
+              if (status === 'OK' && results?.[0]?.geometry?.viewport) {
+                const bounds = results[0].geometry.viewport;
+                polygonCoords = [
+                  bounds.getSouthWest(),
+                  { lat: bounds.getSouthWest().lat(), lng: bounds.getNorthEast().lng() },
+                  bounds.getNorthEast(),
+                  { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
+                ];
+                polygon = createPolygon(polygonCoords, mapInstance);
+              } else {
+                // Fallback to estimated polygon
+                polygonCoords = createEstimatedPolygon(lat, lng);
+                polygon = createPolygon(polygonCoords, mapInstance);
+                if (status !== 'OK') {
+                  console.log("Could not retrieve precise roof outline. Showing estimated.");
+                  setError("Could not retrieve precise roof outline. Showing estimated.");
+                }
+              }
 
-          if (status === 'OK' && results?.[0]?.geometry?.viewport) {
-            const bounds = results[0].geometry.viewport;
-            polygonCoords = [
-              bounds.getSouthWest(),
-              { lat: bounds.getSouthWest().lat(), lng: bounds.getNorthEast().lng() },
-              bounds.getNorthEast(),
-              { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
-            ];
-            polygon = createPolygon(polygonCoords, mapInstance);
+              roofPolygonRef.current = polygon;
+              setLoading(false);
+            });
           } else {
-            polygonCoords = createEstimatedPolygon(lat, lng);
-            polygon = createPolygon(polygonCoords, mapInstance);
-            if (status !== 'OK') setError("Could not retrieve precise roof outline. Showing estimated.");
+            // Fallback if Places API isn't available
+            const polygonCoords = createEstimatedPolygon(lat, lng);
+            const polygon = createPolygon(polygonCoords, mapInstance);
+            roofPolygonRef.current = polygon;
+            setError("Google Places API not available. Showing estimated outline.");
+            setLoading(false);
           }
-
+        } catch (placeErr) {
+          // Fallback for any Places API error
+          console.error("Error with Places API:", placeErr);
+          const polygonCoords = createEstimatedPolygon(lat, lng);
+          const polygon = createPolygon(polygonCoords, mapInstance);
           roofPolygonRef.current = polygon;
+          setError("Error determining roof outline. Showing estimated.");
           setLoading(false);
-        });
-
+        }
       } catch (err) {
         console.error("Error initializing map:", err);
         if (isMounted.current) {
@@ -157,17 +185,21 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
     loadGoogleMapsScript();
 
+    // Cleanup function - FIXED to remove the invalid setDiv method
     return () => {
       isMounted.current = false;
-      if (mapRef.current) {
+      
+      // Safely clear event listeners
+      if (mapRef.current && window.google?.maps?.event) {
         window.google.maps.event.clearInstanceListeners(mapRef.current);
-        mapRef.current.setDiv(null);
       }
+      
+      // Clean up the polygon if it exists
       if (roofPolygonRef.current) {
         roofPolygonRef.current.setMap(null);
       }
     };
-  }, [formData.lat, formData.lng, formData.address, createPolygon, createEstimatedPolygon, metersToDegrees]);
+  }, [formData.lat, formData.lng, formData.address, createPolygon, createEstimatedPolygon]);
 
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
@@ -198,14 +230,24 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         <div className="absolute top-2 right-2 flex flex-col z-10">
           <button
             type="button"
-            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) + 1)}
+            onClick={() => {
+              if (mapRef.current) {
+                const currentZoom = mapRef.current.getZoom() || 19;
+                mapRef.current.setZoom(currentZoom + 1);
+              }
+            }}
             className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
           >
             +
           </button>
           <button
             type="button"
-            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) - 1)}
+            onClick={() => {
+              if (mapRef.current) {
+                const currentZoom = mapRef.current.getZoom() || 19;
+                mapRef.current.setZoom(currentZoom - 1);
+              }
+            }}
             className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
           >
             -
