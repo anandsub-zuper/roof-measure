@@ -1,4 +1,4 @@
-// src/components/map/GoogleMapContainer.js - Updated with backend-based OpenAI Vision
+// src/components/map/GoogleMapContainer.js - Fixed version
 import React, { useEffect, forwardRef, useImperativeHandle } from 'react';
 import { analyzeRoofImage } from '../../services/openAIService';
 import { captureMapImage } from '../../utils/imageUtils';
@@ -134,7 +134,7 @@ const GoogleMapContainer = forwardRef(({
           // Wait for the map to be fully loaded and stabilized before capturing
           captureTimeout = setTimeout(() => {
             // Try to create the roof polygon using OpenAI Vision
-            createRoofPolygonWithAI(mapInstance, parsedLat, parsedLng, address);
+            createRoofPolygonWithAI(parsedLat, parsedLng, address);
           }, 2000);
         } catch (error) {
           console.error("Error initializing map:", error);
@@ -143,10 +143,10 @@ const GoogleMapContainer = forwardRef(({
       };
 
       // Create roof polygon using OpenAI Vision API (via backend)
-      const createRoofPolygonWithAI = async (mapInstance, lat, lng, address) => {
+      const createRoofPolygonWithAI = async (lat, lng, address) => {
         try {
-          // First, capture the map as an image
-          const imageBase64 = await captureMapImage(mapInstance);
+          // First, capture the map as an image - FIX: Use mapInstanceRef instead of mapInstance
+          const imageBase64 = await captureMapImage(mapInstanceRef);
           
           // Then analyze the image with OpenAI Vision (through our backend)
           const coordinates = await analyzeRoofImage(imageBase64);
@@ -156,12 +156,12 @@ const GoogleMapContainer = forwardRef(({
             createPolygon(coordinates);
           } else {
             // Fall back to traditional methods if AI detection fails
-            createRoofPolygon(mapInstance, lat, lng, address);
+            createRoofPolygon(lat, lng, address);
           }
         } catch (error) {
           console.error("Error with AI roof detection:", error);
           // Fall back to traditional methods
-          createRoofPolygon(mapInstance, lat, lng, address);
+          createRoofPolygon(lat, lng, address);
         }
       };
 
@@ -189,7 +189,7 @@ const GoogleMapContainer = forwardRef(({
           fillColor: '#2563EB',   // Blue fill
           fillOpacity: 0.4,       // Semi-transparent
           zIndex: 100,
-          map: mapInstance
+          map: mapInstanceRef // FIX: Use mapInstanceRef instead of mapInstance
         });
         
         // Save the polygon reference
@@ -206,12 +206,12 @@ const GoogleMapContainer = forwardRef(({
       };
 
       // Original fallback method for roof polygon creation
-      const createRoofPolygon = (mapInstance, lat, lng, address) => {
+      const createRoofPolygon = (lat, lng, address) => {
         try {
           if (window.google?.maps?.places) {
             // Try using Places API
             try {
-              const placesService = new window.google.maps.places.PlacesService(mapInstance);
+              const placesService = new window.google.maps.places.PlacesService(mapInstanceRef); // FIX: Use mapInstanceRef
               
               const request = {
                 query: address,
