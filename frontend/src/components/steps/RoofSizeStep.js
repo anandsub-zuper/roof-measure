@@ -2,12 +2,11 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
-import MemoizedGoogleMapContainer from '../map/MemoizedGoogleMapContainer';
-import DummyMapContainer from '../map/DummyMapContainer'; // Make sure to create this file from the previous solution
+import GoogleMapContainer from '../map/GoogleMapContainer';
 import config from '../../config';
 import killSwitch from '../../killSwitch';
-import { debounce } from '../../utils/debounce';
-import performanceMonitor from '../../utils/performance';
+import { debounce } from '../../utils/debounce'; // Make sure this path is correct
+import performanceMonitor from '../../utils/performance'; // Make sure this path is correct
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const renderTime = performance.now();
@@ -28,24 +27,28 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     });
     
     // Track component performance
-    performanceMonitor.trackComponent('RoofSizeStep', performance.now() - renderTime);
+    if (performanceMonitor && performanceMonitor.trackComponent) {
+      performanceMonitor.trackComponent('RoofSizeStep', performance.now() - renderTime);
+    }
     
     // Check memory usage occasionally
-    performanceMonitor.checkMemory();
-  }, [formData.lat, formData.lng, formData.roofSize]);
+    if (performanceMonitor && performanceMonitor.checkMemory) {
+      performanceMonitor.checkMemory();
+    }
+  }, [formData.lat, formData.lng, formData.roofSize, renderTime]);
 
   // Create a debounced update function for roof size
   const debouncedUpdateRoofSize = useCallback(
-    debounce((value) => {
+    debounce ? debounce((value) => {
       updateFormData('roofSize', value);
-    }, 300),
+    }, 300) : (value) => updateFormData('roofSize', value),
     [updateFormData]
   );
 
   // Check if Google Maps is disabled due to missing API key
   useEffect(() => {
     // Check for the flag set in config.js
-    if (window.googleMapsDisabled || killSwitch.googleMaps) {
+    if (window.googleMapsDisabled || (killSwitch && killSwitch.googleMaps)) {
       console.log("Maps disabled, skipping map view");
       setMapDisabled(true);
       setLoading(false);
@@ -83,7 +86,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize]);
 
-  // Handle map events
+  // Handle map events - optimized with useCallback
   const handleMapReady = useCallback(() => {
     console.log("Map ready event received");
     setLoading(false);
@@ -101,9 +104,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize, updateFormData]);
 
-  // Handle polygon creation with fallback
+  // Handle polygon creation with fallback - optimized with useCallback
   const handlePolygonCreated = useCallback((polygon, area) => {
-    performanceMonitor.start('polygonAreaCalc');
+    if (performanceMonitor && performanceMonitor.start) {
+      performanceMonitor.start('polygonAreaCalc');
+    }
+    
     console.log("Polygon created with area:", area);
     
     if (formData.roofSizeAuto) {
@@ -112,7 +118,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       setLocalRoofSize(areaValue);
       debouncedUpdateRoofSize(areaValue);
     }
-    performanceMonitor.end('polygonAreaCalc');
+    
+    if (performanceMonitor && performanceMonitor.end) {
+      performanceMonitor.end('polygonAreaCalc');
+    }
   }, [formData.roofSize, formData.roofSizeAuto, debouncedUpdateRoofSize]);
 
   // Toggle automatic/manual size - optimized with useCallback
@@ -121,7 +130,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     updateFormData('roofSizeAuto', isAuto);
   }, [updateFormData]);
 
-  // Handle manual roof size input - optimized with local state
+  // Handle manual roof size input - optimized with useCallback and local state
   const handleManualSizeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     if (!isNaN(value) && value > 0) {
@@ -135,7 +144,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSizeAuto, debouncedUpdateRoofSize]);
 
-  // Check if we have valid coordinates
+  // Check if we have valid coordinates - optimized with useCallback
   const hasValidCoordinates = useCallback(() => {
     try {
       const lat = parseFloat(formData.lat);
@@ -160,6 +169,18 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     setLoading(false);
   }, [formData.roofSize, updateFormData]);
 
+  // Debug function for environment variables
+  const debugEnvironment = useCallback(() => {
+    console.log("Environment check:", {
+      googleMapsKey: config.googleMapsApiKey ? "Present (first 4 chars: " + config.googleMapsApiKey.substring(0,4) + "...)" : "Missing",
+      apiUrl: config.apiUrl,
+      mapDisabled: mapDisabled,
+      skipMap: skipMap,
+      formDataRoofSize: formData.roofSize,
+      localRoofSize: localRoofSize
+    });
+  }, [mapDisabled, skipMap, formData.roofSize, localRoofSize]);
+
   // Memoize coordinates for map
   const coordinates = useMemo(() => {
     if (hasValidCoordinates()) {
@@ -171,44 +192,49 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     return null;
   }, [formData.lat, formData.lng, hasValidCoordinates]);
 
-  // Determine which map component to render - wrapped in useMemo to prevent unnecessary recalculations
+  // Determine which map component to render - wrapped in useMemo
   const mapComponent = useMemo(() => {
     if (!coordinates) {
       return (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
           <Camera size={40} className="mb-2 text-gray-400" />
           <p className="text-gray-500">No coordinates available</p>
+          <p className="text-xs text-gray-400 mt-2">
+            {JSON.stringify({lat: formData.lat, lng: formData.lng})}
+          </p>
         </div>
       );
     }
     
-    if (skipMap || mapDisabled || killSwitch.googleMaps) {
+    if (skipMap || mapDisabled || (killSwitch && killSwitch.googleMaps)) {
       return (
-        <DummyMapContainer
-          ref={mapContainerRef}
-          lat={coordinates.lat}
-          lng={coordinates.lng}
-          address={formData.address}
-          onMapReady={handleMapReady}
-          onPolygonCreated={handlePolygonCreated}
-        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
+          <Camera size={40} className="mb-2 text-gray-400" />
+          <p className="text-gray-500">
+            {mapDisabled ? "Map view disabled" : "Map view skipped"}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Using estimated roof size
+          </p>
+        </div>
       );
     }
     
     return (
-      <MemoizedGoogleMapContainer
+      <GoogleMapContainer
         ref={mapContainerRef}
         lat={coordinates.lat}
         lng={coordinates.lng}
         address={formData.address}
+        roofSize={formData.roofSize} // CRITICAL: Pass the backend roof size
         onMapReady={handleMapReady}
         onMapError={handleMapError}
         onPolygonCreated={handlePolygonCreated}
       />
     );
   }, [
-    coordinates, skipMap, mapDisabled, formData.address, 
-    handleMapReady, handleMapError, handlePolygonCreated
+    coordinates, skipMap, mapDisabled, formData.address, formData.roofSize,
+    handleMapReady, handleMapError, handlePolygonCreated, killSwitch
   ]);
 
   return (
@@ -216,13 +242,23 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
       <p className="text-sm text-gray-600 mb-4">{formData.address}</p>
       
+      {/* Debug button - only in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <button 
+          onClick={debugEnvironment}
+          className="mb-2 text-xs text-gray-400 hover:text-gray-600"
+        >
+          Debug Environment
+        </button>
+      )}
+      
       {/* Map Container with Satellite View */}
       <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
         {/* Render the memoized map component */}
         {mapComponent}
         
         {/* Loading overlay */}
-        {coordinates && loading && !error && !skipMap && !mapDisabled && !killSwitch.googleMaps && (
+        {coordinates && loading && !error && !skipMap && !mapDisabled && !(killSwitch && killSwitch.googleMaps) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Loading satellite imagery...</p>
@@ -245,7 +281,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         )}
 
         {/* Zoom controls - only show when map is loaded and visible */}
-        {coordinates && !loading && !skipMap && !mapDisabled && !error && !killSwitch.googleMaps && (
+        {coordinates && !loading && !skipMap && !mapDisabled && !error && !(killSwitch && killSwitch.googleMaps) && (
           <div className="absolute top-2 right-2 flex flex-col z-20">
             <button
               type="button"
@@ -264,7 +300,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </div>
         )}
 
-        {coordinates && !loading && !skipMap && !mapDisabled && !error && !killSwitch.googleMaps && (
+        {coordinates && !loading && !skipMap && !mapDisabled && !error && !(killSwitch && killSwitch.googleMaps) && (
           <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
             <Ruler size={16} className="mr-1" /> Estimated roof outline
           </div>
@@ -282,7 +318,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
         
         <p className="text-sm text-gray-600 mb-3">
-          {skipMap || error || mapDisabled || killSwitch.googleMaps ? 
+          {skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? 
             "Using estimated roof size based on property data." : 
             "Our AI analyzed your roof using satellite imagery."}
           {" You can also enter the size manually."}
@@ -297,7 +333,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               onChange={handleToggleAutoSize}
               className="mr-2 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
             />
-            Use {skipMap || error || mapDisabled || killSwitch.googleMaps ? "estimated" : "AI-calculated"} size (recommended)
+            Use {skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? "estimated" : "AI-calculated"} size (recommended)
           </label>
         </div>
 
