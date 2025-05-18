@@ -9,9 +9,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const roofPolygonRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const isMounted = useRef(true); // Use useRef for the mounted flag
+  const isMounted = useRef(true);
 
-  // Convert meters to degrees at the property's latitude (memoized)
   const metersToDegrees = useCallback((meters, lat) => {
     const latRad = lat * (Math.PI / 180);
     const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
@@ -22,7 +21,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     };
   }, []);
 
-  // Create polygon from coordinates (memoized)
   const createPolygon = useCallback((coords, map) => {
     return new window.google.maps.Polygon({
       paths: coords,
@@ -32,11 +30,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       fillColor: '#2563EB',
       fillOpacity: 0.4,
       zIndex: 100,
-      map: map // Ensure map is set during creation
+      map: map
     });
   }, []);
 
-  // Fallback to estimated polygon (memoized)
   const createEstimatedPolygon = useCallback((lat, lng) => {
     const conversion = metersToDegrees(15, lat);
     return [
@@ -47,9 +44,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     ];
   }, [metersToDegrees]);
 
-  // Initialize Google Maps with satellite view
   useEffect(() => {
-    let map;
+    let mapInstance;
     let placesService;
 
     const loadGoogleMapsScript = () => {
@@ -100,7 +96,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         const lat = parseFloat(formData.lat);
         const lng = parseFloat(formData.lng);
 
-        map = new window.google.maps.Map(mapContainerRef.current, {
+        mapInstance = new window.google.maps.Map(mapContainerRef.current, {
           center: { lat, lng },
           zoom: 19,
           mapTypeId: 'satellite',
@@ -114,13 +110,9 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           }
         });
 
-        if (map.setOptions) {
-          map.setOptions({ buildings: true });
-        }
+        mapRef.current = mapInstance;
 
-        mapRef.current = map;
-
-        placesService = new window.google.maps.places.PlacesService(map);
+        placesService = new window.google.maps.places.PlacesService(mapInstance);
         console.warn("Using google.maps.places.PlacesService which is deprecated for new customers as of March 1st, 2025. Please consider migrating to the new Places API (New). See https://developers.google.com/maps/legacy and https://developers.google.com/maps/documentation/javascript/places-migration-overview for more information.");
 
         const request = {
@@ -135,7 +127,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           let polygon;
           let polygonCoords;
 
-          if (status === 'OK' && results && results.length > 0 && results[0]?.geometry?.viewport) {
+          if (status === 'OK' && results?.[0]?.geometry?.viewport) {
             const bounds = results[0].geometry.viewport;
             polygonCoords = [
               bounds.getSouthWest(),
@@ -143,14 +135,11 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               bounds.getNorthEast(),
               { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
             ];
-            polygon = createPolygon(polygonCoords, map);
+            polygon = createPolygon(polygonCoords, mapInstance);
           } else {
             polygonCoords = createEstimatedPolygon(lat, lng);
-            polygon = createPolygon(polygonCoords, map);
-            if (status !== 'OK') {
-              console.error("Places API error:", status);
-              setError("Could not retrieve precise roof outline. Showing estimated.");
-            }
+            polygon = createPolygon(polygonCoords, mapInstance);
+            if (status !== 'OK') setError("Could not retrieve precise roof outline. Showing estimated.");
           }
 
           roofPolygonRef.current = polygon;
@@ -170,13 +159,15 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
     return () => {
       isMounted.current = false;
-      if (map) {
-        window.google.maps.event.clearInstanceListeners(map);
-        map.setDiv(null); // Try explicitly removing the map from its container
+      if (mapRef.current) {
+        window.google.maps.event.clearInstanceListeners(mapRef.current);
+        mapRef.current.setDiv(null);
       }
-      roofPolygonRef.current = null; // Clear the ref
+      if (roofPolygonRef.current) {
+        roofPolygonRef.current.setMap(null);
+      }
     };
-  }, [formData.lat, formData.lng, formData.address, createPolygon, createEstimatedPolygon, metersToDegrees]); // Add dependencies for useCallback
+  }, [formData.lat, formData.lng, formData.address, createPolygon, createEstimatedPolygon, metersToDegrees]);
 
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
