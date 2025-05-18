@@ -49,6 +49,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   useEffect(() => {
     let map;
     let placesService;
+    let isMounted = true; // To prevent state updates on unmounted component
 
     const loadGoogleMapsScript = () => {
       if (window.google && window.google.maps) {
@@ -68,19 +69,23 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       script.async = true;
       script.defer = true;
 
-      script.onload = () => initMap();
+      script.onload = () => {
+        if (isMounted) {
+          initMap();
+        }
+      };
       script.onerror = () => {
-        setError("Failed to load Google Maps API");
-        setLoading(false);
+        if (isMounted) {
+          setError("Failed to load Google Maps API");
+          setLoading(false);
+        }
       };
 
       document.head.appendChild(script);
     };
 
     const initMap = () => {
-      if (!mapContainerRef.current || !window.google?.maps) {
-        setError("Map container or Google Maps not available");
-        setLoading(false);
+      if (!isMounted || !mapContainerRef.current || !window.google?.maps) {
         return;
       }
 
@@ -108,29 +113,28 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           }
         });
 
-        // Enable 3D buildings if available
         if (map.setOptions) {
           map.setOptions({ buildings: true });
         }
 
         mapRef.current = map;
 
-        // Initialize Places API with the new recommended approach
+        // Initialize Places API (acknowledging deprecation)
         placesService = new window.google.maps.places.PlacesService(map);
+        console.warn("Using google.maps.places.PlacesService which is deprecated for new customers as of March 1st, 2025. Please consider migrating to the new Places API (New). See https://developers.google.com/maps/legacy and https://developers.google.com/maps/documentation/javascript/places-migration-overview for more information.");
 
-        // Create a request for place search
         const request = {
           query: formData.address,
           fields: ['geometry'],
           locationBias: { lat, lng },
         };
 
-        // Use the new findPlaceFromQuery method
         placesService.findPlaceFromQuery(request, (results, status) => {
+          if (!isMounted) return;
+
           let polygonCoords;
-          
-          if (status === 'OK' && results[0]?.geometry?.viewport) {
-            // Use actual building bounds
+
+          if (status === 'OK' && results && results.length > 0 && results[0]?.geometry?.viewport) {
             const bounds = results[0].geometry.viewport;
             polygonCoords = [
               bounds.getSouthWest(),
@@ -139,8 +143,11 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
             ];
           } else {
-            // Fallback to estimated polygon
             polygonCoords = createEstimatedPolygon(lat, lng);
+            if (status !== 'OK') {
+              console.error("Places API error:", status);
+              setError("Could not retrieve precise roof outline. Showing estimated.");
+            }
           }
 
           const polygon = createPolygon(polygonCoords, map);
@@ -151,15 +158,17 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
       } catch (err) {
         console.error("Error initializing map:", err);
-        setError("Error initializing map");
-        setLoading(false);
+        if (isMounted) {
+          setError("Error initializing map");
+          setLoading(false);
+        }
       }
     };
 
     loadGoogleMapsScript();
 
     return () => {
-      // Clean up map and places service
+      isMounted = false;
       if (map) {
         window.google.maps.event.clearInstanceListeners(map);
       }
@@ -173,9 +182,9 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
       <p className="text-sm text-gray-600 mb-4">{formData.address}</p>
-      
-      <div 
-        ref={mapContainerRef} 
+
+      <div
+        ref={mapContainerRef}
         className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden"
       >
         {(loading || error) && (
@@ -194,29 +203,29 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             )}
           </div>
         )}
-        
+
         <div className="absolute top-2 right-2 flex flex-col z-10">
-          <button 
-            type="button" 
-            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) + 1)} 
+          <button
+            type="button"
+            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) + 1)}
             className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
           >
             +
           </button>
-          <button 
-            type="button" 
-            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) - 1)} 
+          <button
+            type="button"
+            onClick={() => mapRef.current?.setZoom((mapRef.current?.getZoom() || 19) - 1)}
             className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
           >
             -
           </button>
         </div>
-        
+
         <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-10">
           <Ruler size={16} className="mr-1" /> Estimated roof outline
         </div>
       </div>
-      
+
       <div className="w-full bg-blue-50 p-4 rounded-lg mb-6">
         <div className="flex justify-between items-center mb-2">
           <div className="flex items-center">
@@ -226,7 +235,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           <span className="text-lg font-bold">{formatNumber(formData.roofSize)} sq ft</span>
         </div>
         <p className="text-sm text-gray-600">Our AI analyzed your roof using high-resolution satellite imagery</p>
-        
+
         <div className="mt-4">
           <label className="flex items-center text-sm text-gray-700">
             <input
@@ -238,7 +247,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             Use AI-calculated size (recommended)
           </label>
         </div>
-        
+
         {!formData.roofSizeAuto && (
           <div className="mt-3">
             <label className="block text-sm font-medium mb-1">Manually enter roof size</label>
@@ -252,16 +261,16 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </div>
         )}
       </div>
-      
+
       <div className="flex w-full justify-between">
-        <button 
-          onClick={prevStep} 
+        <button
+          onClick={prevStep}
           className="bg-gray-200 text-gray-800 py-2 px-4 rounded-lg hover:bg-gray-300 flex items-center transition-colors"
         >
           <ChevronLeft size={16} className="mr-1" /> Back
         </button>
-        <button 
-          onClick={nextStep} 
+        <button
+          onClick={nextStep}
           className="bg-primary-600 text-white py-2 px-8 rounded-lg hover:bg-primary-700 flex items-center transition-colors"
         >
           Continue <ChevronRight size={16} className="ml-1" />
