@@ -1,4 +1,4 @@
-// src/components/map/GoogleMapContainer.js - Fixed version
+// src/components/map/GoogleMapContainer.js - Comprehensive fix
 import React, { useEffect, forwardRef, useImperativeHandle } from 'react';
 import { analyzeRoofImage } from '../../services/openAIService';
 import { captureMapImage } from '../../utils/imageUtils';
@@ -17,6 +17,7 @@ const GoogleMapContainer = forwardRef(({
   let polygonRef = null;
   let mapInitialized = false;
   let captureTimeout = null;
+  let markerRef = null;
 
   // Methods to control the map from outside
   const zoomIn = () => {
@@ -70,8 +71,9 @@ const GoogleMapContainer = forwardRef(({
           return;
         }
 
+        // Add all necessary libraries, including drawing for future enhancements
         const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry,drawing,marker`;
         script.async = true;
         script.defer = true;
 
@@ -121,7 +123,9 @@ const GoogleMapContainer = forwardRef(({
           mapInitialized = true;
           
           // Create a marker at the center
-          new window.google.maps.Marker({
+          // Note: Using traditional Marker as AdvancedMarkerElement may not be fully available yet
+          // Will be migrated in a future update
+          markerRef = new window.google.maps.Marker({
             position: { lat: parsedLat, lng: parsedLng },
             map: mapInstance,
             title: address,
@@ -145,7 +149,7 @@ const GoogleMapContainer = forwardRef(({
       // Create roof polygon using OpenAI Vision API (via backend)
       const createRoofPolygonWithAI = async (lat, lng, address) => {
         try {
-          // First, capture the map as an image - FIX: Use mapInstanceRef instead of mapInstance
+          // First, capture the map as an image
           const imageBase64 = await captureMapImage(mapInstanceRef);
           
           // Then analyze the image with OpenAI Vision (through our backend)
@@ -189,7 +193,7 @@ const GoogleMapContainer = forwardRef(({
           fillColor: '#2563EB',   // Blue fill
           fillOpacity: 0.4,       // Semi-transparent
           zIndex: 100,
-          map: mapInstanceRef // FIX: Use mapInstanceRef instead of mapInstance
+          map: mapInstanceRef
         });
         
         // Save the polygon reference
@@ -211,7 +215,9 @@ const GoogleMapContainer = forwardRef(({
           if (window.google?.maps?.places) {
             // Try using Places API
             try {
-              const placesService = new window.google.maps.places.PlacesService(mapInstanceRef); // FIX: Use mapInstanceRef
+              // Note: Using PlacesService for now, but will need migration in the future
+              // Will be updated in a future enhancement
+              const placesService = new window.google.maps.places.PlacesService(mapInstanceRef);
               
               const request = {
                 query: address,
@@ -258,11 +264,16 @@ const GoogleMapContainer = forwardRef(({
         }
       };
         
-      // Calculate area in square feet for a polygon
+      // Calculate area in square feet for a polygon with validation
       const calculatePolygonArea = (latLngCoords) => {
+        // Default area if calculation fails
+        const DEFAULT_AREA = 2500; // sq ft
+        const MAX_REASONABLE_AREA = 10000; // sq ft - max for typical residential
+
+        // Check if geometry library is available
         if (!window.google?.maps?.geometry?.spherical) {
           console.warn("Google Maps Geometry library not available for area calculation");
-          return 2500; // Default fallback area (sq ft)
+          return DEFAULT_AREA;
         }
         
         try {
@@ -272,6 +283,26 @@ const GoogleMapContainer = forwardRef(({
           // Convert to square feet (1 sq meter = 10.7639 sq feet)
           const areaInSquareFeet = areaInSquareMeters * 10.7639;
           
+          // Validate area - if unreasonably large, use a sensible default
+          if (areaInSquareFeet > MAX_REASONABLE_AREA) {
+            console.warn(`Calculated area (${areaInSquareFeet.toFixed(2)} sq ft) exceeds maximum reasonable size. Using default area.`);
+            
+            // Try to determine if this might be a commercial building based on size
+            if (areaInSquareFeet > 50000) {
+              // Likely a very large commercial building
+              return 8000;
+            }
+            
+            // For moderately large areas, use an intermediate value
+            return 4500;
+          }
+          
+          // For very small areas that might be calculation errors
+          if (areaInSquareFeet < 500) {
+            console.warn(`Calculated area (${areaInSquareFeet.toFixed(2)} sq ft) is unusually small. Using default area.`);
+            return DEFAULT_AREA;
+          }
+          
           // Apply a roof steepness factor based on building type and region
           const steepnessFactor = getRegionalSteepnessFactor(address);
           
@@ -279,7 +310,7 @@ const GoogleMapContainer = forwardRef(({
           return Math.round(areaInSquareFeet * steepnessFactor);
         } catch (error) {
           console.error("Error calculating area:", error);
-          return 2500; // Default fallback area (sq ft)
+          return DEFAULT_AREA;
         }
       };
 
@@ -293,15 +324,17 @@ const GoogleMapContainer = forwardRef(({
             addressLower.includes('montana') || 
             addressLower.includes('minnesota') ||
             addressLower.includes('maine') ||
-            addressLower.includes('vermont')) {
+            addressLower.includes('vermont') ||
+            addressLower.includes('washington')) { // Added Washington state
           return 1.35; // Steeper roofs for snow regions
         }
         
         // Flat roof regions
         if (addressLower.includes('arizona') || 
             addressLower.includes('nevada') || 
-            addressLower.includes('new mexico')) {
-          return 1.1; // Flatter roofs in desert areas
+            addressLower.includes('new mexico') ||
+            addressLower.includes('california')) { // Added California
+          return 1.1; // Flatter roofs in desert/warm areas
         }
         
         // Default factor for other regions
@@ -351,6 +384,11 @@ const GoogleMapContainer = forwardRef(({
       if (polygonRef) {
         polygonRef.setMap(null);
         polygonRef = null;
+      }
+      
+      if (markerRef) {
+        markerRef.setMap(null);
+        markerRef = null;
       }
       
       if (mapInstanceRef && window.google?.maps?.event) {
