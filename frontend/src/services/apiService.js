@@ -29,6 +29,14 @@ api.interceptors.response.use(
   }
 );
 
+// Debug: Log all API URLs
+console.log("API URL configuration:", {
+  baseURL: API_URL,
+  geocodeEndpoint: `${API_URL}/api/maps/geocode`,
+  roofSizeEndpoint: `${API_URL}/api/maps/roof-size`,
+  estimateEndpoint: `${API_URL}/api/estimates/generate`
+});
+
 /**
  * Test the API connection
  * @returns {Promise} - Resolves with API status
@@ -50,10 +58,18 @@ export const testApiConnection = async () => {
  */
 export const getAddressCoordinates = async (address) => {
   try {
+    console.log("Geocoding address:", address);
     const response = await api.post('/api/maps/geocode', { address });
+    console.log("Raw geocoding response:", response.data);
+    
+    // Check if the response has the success property
+    if (response.data && response.data.success === false) {
+      throw new Error(response.data.message || "Geocoding failed");
+    }
+    
     return response.data;
   } catch (error) {
-    console.error('Error getting coordinates');
+    console.error('Error getting coordinates:', error);
     throw error;
   }
 };
@@ -66,10 +82,18 @@ export const getAddressCoordinates = async (address) => {
  */
 export const getRoofSizeEstimate = async (lat, lng) => {
   try {
+    console.log("Getting roof size for coordinates:", { lat, lng });
     const response = await api.post('/api/maps/roof-size', { lat, lng });
+    console.log("Raw roof size response:", response.data);
+    
+    // Check if the response has the success property
+    if (response.data && response.data.success === false) {
+      throw new Error(response.data.message || "Roof size estimation failed");
+    }
+    
     return response.data;
   } catch (error) {
-    console.error('Error estimating roof size');
+    console.error('Error estimating roof size:', error);
     throw error;
   }
 };
@@ -81,10 +105,18 @@ export const getRoofSizeEstimate = async (lat, lng) => {
  */
 export const generateRoofEstimate = async (formData) => {
   try {
+    console.log("Generating estimate with data:", formData);
     const response = await api.post('/api/estimates/generate', formData);
+    console.log("Raw estimate response:", response.data);
+    
+    // Check if the response has the success property
+    if (response.data && response.data.success === false) {
+      throw new Error(response.data.message || "Estimate generation failed");
+    }
+    
     return response.data;
   } catch (error) {
-    console.error('Error generating estimate');
+    console.error('Error generating estimate:', error);
     throw error;
   }
 };
@@ -96,10 +128,22 @@ export const generateRoofEstimate = async (formData) => {
  */
 export const submitEstimate = async (data) => {
   try {
+    console.log("Submitting estimate with contact info:", {
+      name: data.name,
+      email: data.email,
+      phone: data.phone
+    });
     const response = await api.post('/api/estimates/submit', data);
+    console.log("Raw submission response:", response.data);
+    
+    // Check if the response has the success property
+    if (response.data && response.data.success === false) {
+      throw new Error(response.data.message || "Estimate submission failed");
+    }
+    
     return response.data;
   } catch (error) {
-    console.error('Error submitting estimate');
+    console.error('Error submitting estimate:', error);
     throw error;
   }
 };
