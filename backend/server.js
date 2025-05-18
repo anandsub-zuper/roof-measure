@@ -12,12 +12,16 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const corsOptions = {
+  origin: ['https://roof-measure.netlify.app', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+
 // Security and utility middleware
 app.use(helmet()); // Security headers
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000', 
-  credentials: true
-}));
+app.use(cors(corsOptions));
 app.use(express.json()); // Parse JSON requests
 app.use(morgan('dev')); // Request logging
 
@@ -36,6 +40,8 @@ app.get('/', (req, res) => {
 
 // Global error handler
 app.use(errorHandler);
+
+console.log('CORS configured for origins:', corsOptions.origin);
 
 // Start server
 app.listen(PORT, () => {
