@@ -1,4 +1,6 @@
-javascriptimport { useEffect, useRef, useState } from 'react';
+// src/hooks/useGoogleMaps.js
+import { useEffect, useRef, useState } from 'react';
+import { loadGoogleMapsApi } from '../services/mapsService';
 
 export default function useGoogleMaps(mapOptions = {}) {
   const mapRef = useRef(null);
@@ -8,37 +10,9 @@ export default function useGoogleMaps(mapOptions = {}) {
   
   // Load Google Maps script
   useEffect(() => {
-    // Check if script is already loaded
-    if (window.google && window.google.maps) {
-      setIsLoaded(true);
-      return;
-    }
-    
-    // Create script element
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY}&libraries=places`;
-    script.async = true;
-    script.defer = true;
-    
-    // Handle script load success
-    script.onload = () => {
-      setIsLoaded(true);
-    };
-    
-    // Handle script load error
-    script.onerror = (e) => {
-      setError(new Error('Failed to load Google Maps script'));
-    };
-    
-    // Add script to document
-    document.head.appendChild(script);
-    
-    // Cleanup
-    return () => {
-      if (script.parentNode) {
-        script.parentNode.removeChild(script);
-      }
-    };
+    loadGoogleMapsApi()
+      .then(() => setIsLoaded(true))
+      .catch(err => setError(err));
   }, []);
   
   // Initialize map when script is loaded and container is available
