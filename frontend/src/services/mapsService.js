@@ -58,6 +58,35 @@ export function loadGoogleMapsApi() {
 }
 
 /**
+ * Initialize Places Autocomplete
+ * @param {HTMLInputElement} inputElement - The input field for address
+ * @returns {Promise<google.maps.places.Autocomplete>} - Autocomplete instance
+ */
+export const initAutocomplete = async (inputElement) => {
+  if (!inputElement) return null;
+  
+  try {
+    await loadGoogleMapsApi();
+    
+    if (!window.google?.maps?.places) {
+      console.error("Google Maps Places library not available");
+      return null;
+    }
+    
+    console.log("Initializing Places Autocomplete");
+    const autocomplete = new window.google.maps.places.Autocomplete(inputElement, {
+      types: ['address'],
+      componentRestrictions: { country: 'us' }
+    });
+    
+    return autocomplete;
+  } catch (error) {
+    console.error('Error initializing autocomplete:', error);
+    return null;
+  }
+};
+
+/**
  * Calculate area of a polygon in square feet
  * @param {Array} coordinates - Array of coordinates or google.maps.LatLng objects
  * @returns {number} Area in square feet
@@ -180,6 +209,7 @@ export const createPolygon = (map, coordinates, options = {}) => {
 
 export default {
   loadGoogleMapsApi,
+  initAutocomplete,
   calculatePolygonArea,
   createEstimatedPolygon,
   createPolygon
