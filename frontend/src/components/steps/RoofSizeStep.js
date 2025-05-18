@@ -1,217 +1,47 @@
 // src/components/steps/RoofSizeStep.js
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
+import GoogleMapContainer from '../map/GoogleMapContainer';
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
-  const mapContainerRef = useRef(null);
-  const mapRef = useRef(null);
-  const roofPolygonRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const isMounted = useRef(true);
+  const mapContainerRef = useRef(null);
 
-  const metersToDegrees = useCallback((meters, lat) => {
-    const latRad = lat * (Math.PI / 180);
-    const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
-    const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
-    return {
-      lat: meters / latDeg,
-      lng: meters / lngDeg
-    };
-  }, []);
+  // Handle map events
+  const handleMapReady = () => {
+    setLoading(false);
+  };
 
-  const createPolygon = useCallback((coords, map) => {
-    if (!window.google?.maps) return null;
-    
-    return new window.google.maps.Polygon({
-      paths: coords,
-      strokeColor: '#2563EB',
-      strokeOpacity: 0.9,
-      strokeWeight: 2.5,
-      fillColor: '#2563EB',
-      fillOpacity: 0.4,
-      zIndex: 100,
-      map: map
-    });
-  }, []);
-
-  const createEstimatedPolygon = useCallback((lat, lng) => {
-    const conversion = metersToDegrees(15, lat);
-    return [
-      { lat: lat - conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }, // SW
-      { lat: lat - conversion.lat * 0.6, lng: lng + conversion.lng * 0.8 }, // SE
-      { lat: lat + conversion.lat * 0.4, lng: lng + conversion.lng * 0.8 }, // NE
-      { lat: lat + conversion.lat * 0.4, lng: lng - conversion.lng * 0.8 }  // NW
-    ];
-  }, [metersToDegrees]);
-
-  useEffect(() => {
-    let mapInstance = null;
-    let placesService = null;
-
-    const loadGoogleMapsScript = () => {
-      if (window.google && window.google.maps) {
-        initMap();
-        return;
-      }
-
-      const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
-      if (!API_KEY) {
-        setError("Google Maps API key is missing");
-        setLoading(false);
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=places,geometry`;
-      script.async = true;
-      script.defer = true;
-
-      script.onload = () => {
-        if (isMounted.current) {
-          initMap();
-        }
-      };
-      script.onerror = () => {
-        if (isMounted.current) {
-          setError("Failed to load Google Maps API");
-          setLoading(false);
-        }
-      };
-
-      document.head.appendChild(script);
-    };
-
-    const initMap = () => {
-      if (!isMounted.current || !mapContainerRef.current || !window.google?.maps) {
-        return;
-      }
-
-      if (!formData.lat || !formData.lng) {
-        setError("Latitude or longitude is missing");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const lat = parseFloat(formData.lat);
-        const lng = parseFloat(formData.lng);
-
-        // Create map instance
-        mapInstance = new window.google.maps.Map(mapContainerRef.current, {
-          center: { lat, lng },
-          zoom: 19,
-          mapTypeId: 'satellite',
-          tilt: 0,
-          mapTypeControl: false,
-          streetViewControl: false,
-          rotateControl: false,
-          fullscreenControl: true,
-          zoomControlOptions: {
-            position: window.google.maps.ControlPosition.RIGHT_TOP
-          }
-        });
-
-        mapRef.current = mapInstance;
-
-        // Try to use Places API to get a more accurate outline
-        try {
-          if (window.google?.maps?.places) {
-            placesService = new window.google.maps.places.PlacesService(mapInstance);
-            
-            // Deprecated API warning (handled safely)
-            console.warn("Using google.maps.places.PlacesService which is deprecated for new customers as of March 1st, 2025. Please consider migrating to the new Places API (New).");
-            
-            const request = {
-              query: formData.address,
-              fields: ['geometry'],
-              locationBias: { lat, lng },
-            };
-
-            placesService.findPlaceFromQuery(request, (results, status) => {
-              if (!isMounted.current) return;
-
-              let polygon;
-              let polygonCoords;
-
-              if (status === 'OK' && results?.[0]?.geometry?.viewport) {
-                const bounds = results[0].geometry.viewport;
-                polygonCoords = [
-                  bounds.getSouthWest(),
-                  { lat: bounds.getSouthWest().lat(), lng: bounds.getNorthEast().lng() },
-                  bounds.getNorthEast(),
-                  { lat: bounds.getNorthEast().lat(), lng: bounds.getSouthWest().lng() }
-                ];
-                polygon = createPolygon(polygonCoords, mapInstance);
-              } else {
-                // Fallback to estimated polygon
-                polygonCoords = createEstimatedPolygon(lat, lng);
-                polygon = createPolygon(polygonCoords, mapInstance);
-                if (status !== 'OK') {
-                  console.log("Could not retrieve precise roof outline. Showing estimated.");
-                  setError("Could not retrieve precise roof outline. Showing estimated.");
-                }
-              }
-
-              roofPolygonRef.current = polygon;
-              setLoading(false);
-            });
-          } else {
-            // Fallback if Places API isn't available
-            const polygonCoords = createEstimatedPolygon(lat, lng);
-            const polygon = createPolygon(polygonCoords, mapInstance);
-            roofPolygonRef.current = polygon;
-            setError("Google Places API not available. Showing estimated outline.");
-            setLoading(false);
-          }
-        } catch (placeErr) {
-          // Fallback for any Places API error
-          console.error("Error with Places API:", placeErr);
-          const polygonCoords = createEstimatedPolygon(lat, lng);
-          const polygon = createPolygon(polygonCoords, mapInstance);
-          roofPolygonRef.current = polygon;
-          setError("Error determining roof outline. Showing estimated.");
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Error initializing map:", err);
-        if (isMounted.current) {
-          setError("Error initializing map");
-          setLoading(false);
-        }
-      }
-    };
-
-    loadGoogleMapsScript();
-
-    // Cleanup function - FIXED to remove the invalid setDiv method
-    return () => {
-      isMounted.current = false;
-      
-      // Safely clear event listeners
-      if (mapRef.current && window.google?.maps?.event) {
-        window.google.maps.event.clearInstanceListeners(mapRef.current);
-      }
-      
-      // Clean up the polygon if it exists
-      if (roofPolygonRef.current) {
-        roofPolygonRef.current.setMap(null);
-      }
-    };
-  }, [formData.lat, formData.lng, formData.address, createPolygon, createEstimatedPolygon]);
+  const handleMapError = (errorMessage) => {
+    setError(errorMessage);
+    setLoading(false);
+  };
 
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
       <p className="text-sm text-gray-600 mb-4">{formData.address}</p>
-
-      <div
-        ref={mapContainerRef}
-        className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden"
-      >
+      
+      <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
+        {/* The map container that isolates Google Maps from React's DOM management */}
+        {formData.lat && formData.lng && (
+          <div className="absolute inset-0">
+            <GoogleMapContainer
+              ref={mapContainerRef}
+              lat={formData.lat}
+              lng={formData.lng}
+              address={formData.address}
+              onMapReady={handleMapReady}
+              onMapError={handleMapError}
+            />
+          </div>
+        )}
+        
+        {/* Loading or error overlay */}
         {(loading || error) && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
             {error ? (
               <>
                 <Camera size={40} className="mb-2" />
@@ -227,13 +57,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </div>
         )}
 
-        <div className="absolute top-2 right-2 flex flex-col z-10">
+        {/* Zoom controls - now calling methods on the isolated component */}
+        <div className="absolute top-2 right-2 flex flex-col z-20">
           <button
             type="button"
             onClick={() => {
-              if (mapRef.current) {
-                const currentZoom = mapRef.current.getZoom() || 19;
-                mapRef.current.setZoom(currentZoom + 1);
+              if (mapContainerRef.current?.zoomIn) {
+                mapContainerRef.current.zoomIn();
               }
             }}
             className="bg-white w-8 h-8 rounded shadow flex items-center justify-center mb-1"
@@ -243,9 +73,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           <button
             type="button"
             onClick={() => {
-              if (mapRef.current) {
-                const currentZoom = mapRef.current.getZoom() || 19;
-                mapRef.current.setZoom(currentZoom - 1);
+              if (mapContainerRef.current?.zoomOut) {
+                mapContainerRef.current.zoomOut();
               }
             }}
             className="bg-white w-8 h-8 rounded shadow flex items-center justify-center"
@@ -254,7 +83,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </button>
         </div>
 
-        <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-10">
+        <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
           <Ruler size={16} className="mr-1" /> Estimated roof outline
         </div>
       </div>
