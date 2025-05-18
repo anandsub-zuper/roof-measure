@@ -75,6 +75,9 @@ const EstimateForm = () => {
   
   // Special handling for address step - get coordinates and roof size
 // Special handling for address step - get coordinates and roof size
+// src/components/EstimateForm.js - getAddressDetails function fix
+// This is only the portion of the function that needs to be modified
+
 const getAddressDetails = useCallback(async () => {
   if (!formData.address) return;
   
@@ -86,6 +89,26 @@ const getAddressDetails = useCallback(async () => {
   setIsLoading(true);
   
   try {
+    // First check for cached address data to avoid API calls
+    const cachedData = apiService.getAddressCache?.(formData.address);
+    if (cachedData && cachedData.lat && cachedData.lng && cachedData.roofSize) {
+      console.log("Using cached address data:", cachedData);
+      
+      // Use cached values for consistent experience
+      updateFormData('lat', cachedData.lat);
+      updateFormData('lng', cachedData.lng);
+      updateFormData('roofSize', cachedData.roofSize);
+      updateFormData('initialRoofSize', cachedData.roofSize); // Critical for consistency
+      
+      // Also use cached polygon if available
+      if (cachedData.roofPolygon) {
+        updateFormData('roofPolygon', cachedData.roofPolygon);
+      }
+      
+      setIsLoading(false);
+      return; // Skip API calls entirely
+    }
+    
     // Get coordinates from address
     console.log("Getting coordinates for address:", formData.address);
     
@@ -130,30 +153,54 @@ const getAddressDetails = useCallback(async () => {
             const sizeData = roofSizeData.data || roofSizeData;
             const roofSize = parseInt(sizeData.size || 0, 10);
             
-            // Store the roof size in a cache for this address to ensure consistency
+            // Store the roof size for consistent experience
             const addressKey = formData.address.replace(/[^a-zA-Z0-9]/g, '_');
-            localStorage.setItem(`roofSize_${addressKey}`, roofSize.toString());
+            
+            // Important: Cache the data for this address
+            if (apiService.saveAddressCache) {
+              apiService.saveAddressCache(formData.address, {
+                lat: lat,
+                lng: lng,
+                roofSize: roofSize,
+                roofPolygon: sizeData.roofPolygon
+              });
+            } else {
+              // Fallback if new cache function not available
+              localStorage.setItem(`roofSize_${addressKey}`, roofSize.toString());
+              
+              // Also cache the lat/lng for reference
+              localStorage.setItem(`lat_${addressKey}`, lat.toString());
+              localStorage.setItem(`lng_${addressKey}`, lng.toString());
+            }
             
             // Important: Also capture the roof polygon if available
             if (sizeData.roofPolygon && Array.isArray(sizeData.roofPolygon)) {
               console.log("Received roof polygon from API:", sizeData.roofPolygon);
               updateFormData('roofPolygon', sizeData.roofPolygon);
+              
+              // Also cache the polygon for consistency
+              if (!apiService.saveAddressCache) {
+                localStorage.setItem(`roofPolygon_${addressKey}`, JSON.stringify(sizeData.roofPolygon));
+              }
             }
             
             if (!isNaN(roofSize) && roofSize > 0) {
               console.log("Setting roof size to:", roofSize);
               updateFormData('roofSize', roofSize);
-              updateFormData('initialRoofSize', roofSize); // Store the initial value for reference
+              updateFormData('initialRoofSize', roofSize); // Store the initial value for consistency
             } else {
               console.log("Invalid roof size, using default");
-              updateFormData('roofSize', 3000); // Default fallback size
+              updateFormData('roofSize', 3000);
+              updateFormData('initialRoofSize', 3000); 
             }
           } else {
-            updateFormData('roofSize', 3000); // Default fallback size
+            updateFormData('roofSize', 3000);
+            updateFormData('initialRoofSize', 3000);
           }
         } catch (sizeError) {
           console.error("Error getting roof size:", sizeError);
-          updateFormData('roofSize', 3000); // Default fallback size
+          updateFormData('roofSize', 3000);
+          updateFormData('initialRoofSize', 3000);
         }
       } else {
         console.error("Invalid coordinates in response:", { lat, lng });
@@ -161,6 +208,7 @@ const getAddressDetails = useCallback(async () => {
         updateFormData('lat', 47.6162);
         updateFormData('lng', -122.0355);
         updateFormData('roofSize', 3000);
+        updateFormData('initialRoofSize', 3000);
         alert("Could not determine the exact location coordinates. Using approximate location.");
       }
     } else {
@@ -169,6 +217,7 @@ const getAddressDetails = useCallback(async () => {
       updateFormData('lat', 47.6162);
       updateFormData('lng', -122.0355);
       updateFormData('roofSize', 3000);
+      updateFormData('initialRoofSize', 3000);
       alert("Error processing address. Using default location data.");
     }
   } catch (error) {
@@ -183,13 +232,13 @@ const getAddressDetails = useCallback(async () => {
     updateFormData('lat', 47.6162);
     updateFormData('lng', -122.0355);
     updateFormData('roofSize', 3000);
+    updateFormData('initialRoofSize', 3000);
     
     alert("There was an error processing your address. Using default location data.");
   } finally {
     setIsLoading(false);
   }
 }, [formData.address, updateFormData]);
-  
   // Generate estimate
   const generateEstimate = useCallback(async () => {
     setIsLoading(true);
