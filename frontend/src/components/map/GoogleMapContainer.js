@@ -1,32 +1,59 @@
-// src/components/map/GoogleMapContainer.js
-import React, { useRef, useEffect } from 'react';
+// src/components/map/GoogleMapContainer.js with forwardRef for proper ref handling
+
+import React, { useEffect, forwardRef, useImperativeHandle } from 'react';
 
 // This component creates a completely isolated container for Google Maps
 // to prevent React from trying to manage its DOM
-const GoogleMapContainer = ({ 
+const GoogleMapContainer = forwardRef(({ 
   lat, 
   lng, 
   address, 
   onMapReady, 
   onMapError, 
   onPolygonCreated 
-}) => {
-  const containerRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const mapInitializedRef = useRef(false);
+}, ref) => {
+  let mapInstanceRef = null;
+  let polygonRef = null;
+  let mapInitialized = false;
+
+  // Methods to control the map from outside
+  const zoomIn = () => {
+    if (mapInstanceRef) {
+      const currentZoom = mapInstanceRef.getZoom() || 19;
+      mapInstanceRef.setZoom(currentZoom + 1);
+    }
+  };
+
+  const zoomOut = () => {
+    if (mapInstanceRef) {
+      const currentZoom = mapInstanceRef.getZoom() || 19;
+      mapInstanceRef.setZoom(currentZoom - 1);
+    }
+  };
+
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    zoomIn,
+    zoomOut,
+    getMapInstance: () => mapInstanceRef
+  }));
 
   useEffect(() => {
-    // Create a div element that React won't try to manage
-    const mapContainer = document.createElement('div');
-    mapContainer.style.width = '100%';
-    mapContainer.style.height = '100%';
-    mapContainer.style.position = 'absolute';
-    mapContainer.style.top = '0';
-    mapContainer.style.left = '0';
+    const containerRef = document.createElement('div');
+    let mapContainer = null;
     
-    // Only append if the ref is available and not already initialized
-    if (containerRef.current && !mapInitializedRef.current) {
-      containerRef.current.appendChild(mapContainer);
+    const initialize = () => {
+      // Create a div element that React won't try to manage
+      mapContainer = document.createElement('div');
+      mapContainer.style.width = '100%';
+      mapContainer.style.height = '100%';
+      mapContainer.style.position = 'absolute';
+      mapContainer.style.top = '0';
+      mapContainer.style.left = '0';
+      mapContainer.style.zIndex = '1'; // Ensure it's above other elements
+      
+      // Append to the parent container
+      containerRef.appendChild(mapContainer);
       
       // Load the Google Maps API
       const loadGoogleMapsAPI = () => {
@@ -87,15 +114,16 @@ const GoogleMapContainer = ({
             }
           });
 
-          // Save the reference to access later (for zoom controls, etc.)
-          mapInstanceRef.current = mapInstance;
-          mapInitializedRef.current = true;
+          // Save the reference
+          mapInstanceRef = mapInstance;
+          mapInitialized = true;
           
           // Create a marker at the center
           new window.google.maps.Marker({
             position: { lat: parsedLat, lng: parsedLng },
             map: mapInstance,
-            title: address
+            title: address,
+            zIndex: 1000
           });
 
           // Notify parent that map is ready
@@ -115,43 +143,69 @@ const GoogleMapContainer = ({
         const createPolygon = (coords) => {
           if (!window.google?.maps) return null;
           
+          // Ensure coordinates are valid Google Maps LatLng objects
+          const validCoords = coords.map(coord => {
+            if (typeof coord.lat === 'function') {
+              // Already a LatLng object
+              return coord;
+            } else {
+              // Create new LatLng object
+              return new window.google.maps.LatLng(coord.lat, coord.lng);
+            }
+          });
+          
+          // Create the polygon with stronger visual styling
           const polygon = new window.google.maps.Polygon({
-            paths: coords,
-            strokeColor: '#2563EB',
-            strokeOpacity: 0.9,
-            strokeWeight: 2.5,
-            fillColor: '#2563EB',
-            fillOpacity: 0.4,
+            paths: validCoords,
+            strokeColor: '#2563EB', // Blue outline
+            strokeOpacity: 1.0,     // Fully opaque
+            strokeWeight: 3,        // Thicker line
+            fillColor: '#2563EB',   // Blue fill
+            fillOpacity: 0.4,       // Semi-transparent
             zIndex: 100,
             map: mapInstance
           });
-
-          onPolygonCreated && onPolygonCreated(polygon);
+          
+          // Save the polygon reference
+          polygonRef = polygon;
+          
+          // Calculate square footage and pass with the polygon
+          const area = calculatePolygonArea(validCoords);
+          
+          if (onPolygonCreated) {
+            onPolygonCreated(polygon, area);
+          }
+          
           return polygon;
         };
-
-        // Create estimated polygon based on lat/lng
-        const createEstimatedPolygon = () => {
-          // Convert meters to degrees at the given latitude
-          const metersToDegrees = (meters) => {
-            const latRad = lat * (Math.PI / 180);
-            const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
-            const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
-            return {
-              lat: meters / latDeg,
-              lng: meters / lngDeg
-            };
-          };
-
-          const conversion = metersToDegrees(15);
-          return [
-            { lat: lat - conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }, // SW
-            { lat: lat - conversion.lat * 0.6, lng: lng + conversion.lng * 0.8 }, // SE
-            { lat: lat + conversion.lat * 0.4, lng: lng + conversion.lng * 0.8 }, // NE
-            { lat: lat + conversion.lat * 0.4, lng: lng - conversion.lng * 0.8 }  // NW
-          ];
+        
+        // Calculate area in square feet for a polygon
+        const calculatePolygonArea = (latLngCoords) => {
+          if (!window.google?.maps?.geometry?.spherical) {
+            console.warn("Google Maps Geometry library not available for area calculation");
+            return 2500; // Default fallback area (sq ft)
+          }
+          
+          try {
+            // Calculate area in square meters
+            const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords);
+            
+            // Convert to square feet (1 sq meter = 10.7639 sq feet)
+            const areaInSquareFeet = areaInSquareMeters * 10.7639;
+            
+            // Apply a roof steepness factor (estimated)
+            // Assuming average roof is ~20-30% steeper than the flat projection
+            const steepnessFactor = 1.25;
+            
+            // Round to the nearest whole number
+            return Math.round(areaInSquareFeet * steepnessFactor);
+          } catch (error) {
+            console.error("Error calculating area:", error);
+            return 2500; // Default fallback area (sq ft)
+          }
         };
 
+        // Create a polygon - try Places API first, then fallback to estimation
         try {
           if (window.google?.maps?.places) {
             // Try using Places API
@@ -177,7 +231,7 @@ const GoogleMapContainer = ({
                   ];
                 } else {
                   // Fallback to estimated polygon
-                  polygonCoords = createEstimatedPolygon();
+                  polygonCoords = createEstimatedPolygon(lat, lng);
                   if (status !== 'OK') {
                     onMapError && onMapError("Using estimated roof outline");
                   }
@@ -187,13 +241,13 @@ const GoogleMapContainer = ({
               });
             } catch (placeErr) {
               console.error("Error with Places API:", placeErr);
-              const polygonCoords = createEstimatedPolygon();
+              const polygonCoords = createEstimatedPolygon(lat, lng);
               createPolygon(polygonCoords);
               onMapError && onMapError("Using estimated roof outline");
             }
           } else {
             // Places API not available, use estimated polygon
-            const polygonCoords = createEstimatedPolygon();
+            const polygonCoords = createEstimatedPolygon(lat, lng);
             createPolygon(polygonCoords);
             onMapError && onMapError("Using estimated roof outline");
           }
@@ -203,56 +257,63 @@ const GoogleMapContainer = ({
         }
       };
 
+      // Create estimated polygon based on lat/lng
+      const createEstimatedPolygon = (lat, lng) => {
+        // Convert meters to degrees at the given latitude
+        const metersToDegrees = (meters) => {
+          const latRad = lat * (Math.PI / 180);
+          const latDeg = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
+          const lngDeg = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
+          return {
+            lat: meters / latDeg,
+            lng: meters / lngDeg
+          };
+        };
+
+        const conversion = metersToDegrees(15);
+        return [
+          { lat: lat - conversion.lat * 0.6, lng: lng - conversion.lng * 0.8 }, // SW
+          { lat: lat - conversion.lat * 0.6, lng: lng + conversion.lng * 0.8 }, // SE
+          { lat: lat + conversion.lat * 0.4, lng: lng + conversion.lng * 0.8 }, // NE
+          { lat: lat + conversion.lat * 0.4, lng: lng - conversion.lng * 0.8 }  // NW
+        ];
+      };
+
       // Start loading Google Maps
       loadGoogleMapsAPI();
+    };
+
+    initialize();
+
+    // Mount the container to the DOM
+    const rootElement = document.getElementById('map-root');
+    if (rootElement) {
+      rootElement.appendChild(containerRef);
     }
 
-    // Clean up function - this is critical for preventing memory leaks
+    // Clean up function
     return () => {
-      // If we have a reference to the map instance
-      if (mapInstanceRef.current && window.google?.maps?.event) {
-        // Clear all event listeners
-        window.google.maps.event.clearInstanceListeners(mapInstanceRef.current);
+      if (polygonRef) {
+        polygonRef.setMap(null);
+        polygonRef = null;
       }
       
-      // Remove the container from the DOM completely
-      if (containerRef.current && mapContainer.parentNode === containerRef.current) {
-        containerRef.current.removeChild(mapContainer);
+      if (mapInstanceRef && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(mapInstanceRef);
+        mapInstanceRef = null;
       }
       
-      // Reset initialization flag to allow reinitializing if needed
-      mapInitializedRef.current = false;
+      if (rootElement && containerRef.parentNode === rootElement) {
+        rootElement.removeChild(containerRef);
+      }
+      
+      mapInitialized = false;
     };
   }, [lat, lng, address, onMapReady, onMapError, onPolygonCreated]);
 
-  // Methods to control the map from outside
-  const zoomIn = () => {
-    if (mapInstanceRef.current) {
-      const currentZoom = mapInstanceRef.current.getZoom() || 19;
-      mapInstanceRef.current.setZoom(currentZoom + 1);
-    }
-  };
-
-  const zoomOut = () => {
-    if (mapInstanceRef.current) {
-      const currentZoom = mapInstanceRef.current.getZoom() || 19;
-      mapInstanceRef.current.setZoom(currentZoom - 1);
-    }
-  };
-
-  // Expose control methods to parent component
-  React.useImperativeHandle(React.createRef(), () => ({
-    zoomIn,
-    zoomOut,
-    getMapInstance: () => mapInstanceRef.current
-  }));
-
   return (
-    <div 
-      ref={containerRef} 
-      style={{ position: 'relative', width: '100%', height: '100%' }}
-    />
+    <div id="map-root" style={{ position: 'relative', width: '100%', height: '100%' }} />
   );
-};
+});
 
 export default GoogleMapContainer;
