@@ -1,13 +1,16 @@
-// src/components/map/GoogleMapContainer.js
-import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import config from '../../config'; // Make sure this path is correct
+// src/components/map/EnhancedGoogleMapContainer.js - Final version
 
-const GoogleMapContainer = forwardRef(({ 
+import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
+import config from '../../config';
+import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
+
+const EnhancedGoogleMapContainer = forwardRef(({ 
   lat, 
   lng, 
   address, 
   roofSize,
-  roofPolygon, // New prop to receive polygon coordinates from backend
+  roofPolygon,
+  propertyData, // New prop to receive property data
   enableDrawing = false,
   onMapReady, 
   onMapError, 
@@ -20,7 +23,11 @@ const GoogleMapContainer = forwardRef(({
   const [errorMessage, setErrorMessage] = useState(null);
   const [loadingTimeout, setLoadingTimeout] = useState(null);
   
-  console.log("GoogleMapContainer rendering with props:", { lat, lng, address, roofSize });
+  console.log("EnhancedGoogleMapContainer rendering with props:", { 
+    lat, lng, address, roofSize,
+    hasPropertyData: !!propertyData,
+    propertyType: propertyData?.propertyType
+  });
   
   // Exposed methods
   useImperativeHandle(ref, () => ({
@@ -46,52 +53,94 @@ const GoogleMapContainer = forwardRef(({
         }
         mapInstance.fitBounds(bounds);
       }
+    },
+    updatePolygon: (newPropertyData) => {
+      if (!mapInstance || !validLat || !validLng) return;
+      
+      // Remove existing polygon
+      if (polygonInstance) {
+        polygonInstance.setMap(null);
+      }
+      
+      // Create new polygon with updated property data
+      const polygonCoords = createRoofPolygon(validLat, validLng, roofSize, roofPolygon, newPropertyData);
+      
+      // Create the polygon on the map
+      const polygon = new window.google.maps.Polygon({
+        paths: polygonCoords,
+        strokeColor: '#2563EB',
+        strokeOpacity: 1.0,
+        strokeWeight: 3,
+        fillColor: '#2563EB',
+        fillOpacity: 0.4,
+        map: mapInstance
+      });
+      setPolygonInstance(polygon);
+      
+      // Calculate area from the polygon
+      const area = calculatePolygonArea(polygonCoords, newPropertyData);
+      
+      // Fit map bounds to show the polygon
+      const bounds = new window.google.maps.LatLngBounds();
+      polygonCoords.forEach(coord => {
+        bounds.extend(coord);
+      });
+      mapInstance.fitBounds(bounds);
+      
+      // Notify parent
+      onPolygonCreated && onPolygonCreated(polygon, area);
     }
   }));
   
+  // Parse coordinates
+  const validLat = parseFloat(lat);
+  const validLng = parseFloat(lng);
+  
   // Function to create accurate polygon based on roof size or provided coords
-  // FIXED: Removed all randomness for consistent polygons
-  const createRoofPolygon = (validLat, validLng, size, providedPolygon = null) => {
+  const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
     // If we have polygon coordinates from the backend, use them
     if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
       console.log("Using provided roof polygon coordinates");
       return providedPolygon;
     }
     
-    // Otherwise, create a deterministic estimate
-    console.log("Creating estimated roof polygon");
-    const roofSizeSqFt = size || 2500;
+    // Use property data for better polygon generation (use passed data or component prop)
+    const dataToUse = currentPropertyData || propertyData;
     
-    // Use fixed aspect ratio for consistency
-    const aspectRatio = 1.5;
+    if (dataToUse) {
+      console.log("Using property data for enhanced polygon generation:", dataToUse.propertyType);
+      return propertyPolygonGenerator.generatePropertyPolygon(
+        validLat, 
+        validLng, 
+        size, 
+        dataToUse
+      );
+    }
     
-    // Calculate dimensions based on roof size and aspect ratio
-    const area = roofSizeSqFt;
-    const width = Math.sqrt(area / aspectRatio);
-    const length = width * aspectRatio;
-    
-    // Convert to degrees - use fixed conversion factors
-    const feetPerDegreeLat = 364000;
-    const latRadians = validLat * (Math.PI / 180);
-    const feetPerDegreeLng = feetPerDegreeLat * Math.cos(latRadians);
-    
-    const latOffset = (length / 2) / feetPerDegreeLat;
-    const lngOffset = (width / 2) / feetPerDegreeLng;
-    
-    // Fixed adjustment factor - no randomness
-    const adjustedLat = validLat + (latOffset * 0.3);
-    
-    // Create perfectly rectangular polygon - no randomness
-    return [
-      { lat: adjustedLat - latOffset, lng: validLng - lngOffset },
-      { lat: adjustedLat - latOffset, lng: validLng + lngOffset },
-      { lat: adjustedLat + latOffset, lng: validLng + lngOffset },
-      { lat: adjustedLat + latOffset, lng: validLng - lngOffset }
-    ];
+    // Fallback to size-based polygon generation
+    console.log("Using size-based polygon generation");
+    return propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
   };
   
   // Calculate polygon area in square feet
-  const calculatePolygonArea = (polygon) => {
+  const calculatePolygonArea = (polygon, currentPropertyData = null) => {
+    // Use passed property data or the component prop
+    const dataToUse = currentPropertyData || propertyData;
+    
+    // If we have verified building size from property data, use that
+    if (dataToUse && dataToUse.buildingSize) {
+      // Calculate roof size from building size if property data available
+      const calculatedRoofSize = propertyPolygonGenerator.calculateRoofSizeFromBuildingSize(
+        dataToUse.buildingSize,
+        dataToUse
+      );
+      
+      if (calculatedRoofSize) {
+        console.log("Using roof size calculated from verified building data:", calculatedRoofSize);
+        return calculatedRoofSize;
+      }
+    }
+    
     if (!window.google || !window.google.maps || !window.google.maps.geometry) {
       console.warn("Google Maps geometry library not available for area calculation");
       return roofSize || 2500; // Return the provided roof size as fallback
@@ -121,7 +170,22 @@ const GoogleMapContainer = forwardRef(({
       // Calculate area in square meters
       const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
       // Convert to square feet (1 sq meter = 10.7639 sq feet)
-      const areaInSquareFeet = Math.round(areaInSquareMeters * 10.7639);
+      
+      // IMPORTANT: Adjust for visual scaling to get actual roof size
+      // Get appropriate scale factor based on property data if available
+      let scaleFactor = 1.8; // Default
+      
+      if (dataToUse) {
+        // Get building-specific scale factor
+        const buildingSize = dataToUse.buildingSize || roofSize;
+        if (buildingSize < 1200) scaleFactor = 2.0;
+        else if (buildingSize < 3000) scaleFactor = 1.9;
+        else if (buildingSize < 5000) scaleFactor = 1.8;
+        else scaleFactor = 1.7;
+      }
+      
+      // Apply reverse scaling to match actual building footprint
+      const areaInSquareFeet = Math.round((areaInSquareMeters * 10.7639) / scaleFactor);
       
       console.log("Calculated polygon area:", areaInSquareFeet, "sq ft");
       
@@ -155,9 +219,6 @@ const GoogleMapContainer = forwardRef(({
     
     try {
       // Ensure we have valid coordinates
-      const validLat = parseFloat(lat);
-      const validLng = parseFloat(lng);
-      
       if (isNaN(validLat) || isNaN(validLng)) {
         const errorMsg = `Invalid coordinates: ${lat}, ${lng}`;
         console.error(errorMsg);
@@ -178,7 +239,7 @@ const GoogleMapContainer = forwardRef(({
       
       console.log("Loading Google Maps API...");
       
-      // Simple function to load Google Maps API
+      // Load Google Maps API
       const loadGoogleMapsApi = () => {
         return new Promise((resolve, reject) => {
           if (window.google && window.google.maps) {
@@ -286,6 +347,47 @@ const GoogleMapContainer = forwardRef(({
           });
           map.fitBounds(bounds);
           
+          // Add zoom control buttons above Google's built-in zoom control
+          const zoomControlDiv = document.createElement('div');
+          zoomControlDiv.style.marginBottom = '10px';
+          
+          // Create zoom in button
+          const zoomInButton = document.createElement('button');
+          zoomInButton.innerHTML = '+';
+          zoomInButton.style.width = '30px';
+          zoomInButton.style.height = '30px';
+          zoomInButton.style.marginBottom = '5px';
+          zoomInButton.style.border = 'none';
+          zoomInButton.style.borderRadius = '2px';
+          zoomInButton.style.backgroundColor = 'white';
+          zoomInButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
+          zoomInButton.style.cursor = 'pointer';
+          zoomInButton.onclick = () => {
+            map.setZoom(map.getZoom() + 1);
+          };
+          
+          // Create zoom out button
+          const zoomOutButton = document.createElement('button');
+          zoomOutButton.innerHTML = '–';
+          zoomOutButton.style.width = '30px';
+          zoomOutButton.style.height = '30px';
+          zoomOutButton.style.border = 'none';
+          zoomOutButton.style.borderRadius = '2px';
+          zoomOutButton.style.backgroundColor = 'white';
+          zoomOutButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
+          zoomOutButton.style.cursor = 'pointer';
+          zoomOutButton.onclick = () => {
+            map.setZoom(map.getZoom() - 1);
+          };
+          
+          // Add buttons to the div
+          zoomControlDiv.appendChild(zoomInButton);
+          zoomControlDiv.appendChild(document.createElement('br'));
+          zoomControlDiv.appendChild(zoomOutButton);
+          
+          // Add the div to the top right of the map
+          map.controls[window.google.maps.ControlPosition.TOP_RIGHT].push(zoomControlDiv);
+          
           // Notify parent components
           onMapReady && onMapReady(map);
           onPolygonCreated && onPolygonCreated(polygon, area);
@@ -317,6 +419,44 @@ const GoogleMapContainer = forwardRef(({
       return () => {};
     }
   }, [lat, lng, address, roofSize, roofPolygon, onMapReady, onMapError, onPolygonCreated]);
+
+  // Update polygon when property data changes
+  useEffect(() => {
+    if (mapInstance && polygonInstance && propertyData) {
+      console.log("Property data updated, updating polygon");
+      
+      // Remove existing polygon
+      polygonInstance.setMap(null);
+      
+      // Create new polygon with updated property data
+      const polygonCoords = createRoofPolygon(validLat, validLng, roofSize, roofPolygon);
+      
+      // Create the polygon on the map
+      const polygon = new window.google.maps.Polygon({
+        paths: polygonCoords,
+        strokeColor: '#2563EB',
+        strokeOpacity: 1.0,
+        strokeWeight: 3,
+        fillColor: '#2563EB',
+        fillOpacity: 0.4,
+        map: mapInstance
+      });
+      setPolygonInstance(polygon);
+      
+      // Calculate area from the polygon
+      const area = calculatePolygonArea(polygonCoords);
+      
+      // Fit map bounds to show the polygon
+      const bounds = new window.google.maps.LatLngBounds();
+      polygonCoords.forEach(coord => {
+        bounds.extend(coord);
+      });
+      mapInstance.fitBounds(bounds);
+      
+      // Notify parent
+      onPolygonCreated && onPolygonCreated(polygon, area);
+    }
+  }, [propertyData]);
 
   // Clean up timeout on unmount
   useEffect(() => {
@@ -362,6 +502,6 @@ const GoogleMapContainer = forwardRef(({
   );
 });
 
-GoogleMapContainer.displayName = 'GoogleMapContainer';
+EnhancedGoogleMapContainer.displayName = 'EnhancedGoogleMapContainer';
 
-export default GoogleMapContainer;
+export default EnhancedGoogleMapContainer;
