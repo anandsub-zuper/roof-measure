@@ -8,6 +8,7 @@ import killSwitch from '../../killSwitch';
 import { debounce } from '../../utils/debounce';
 import polygonDebugTool from '../../utils/polygonDebugTool';
 import performanceMonitor from '../../utils/performance';
+import { logMeasurementDiscrepancy } from '../../utils/metricsLogger';
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const renderTime = performance.now();
@@ -137,24 +138,55 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize, updateFormData]);
 
-  // Handle polygon creation
+  // FIXED: Handle polygon creation with improved logic to handle discrepancies
   const handlePolygonCreated = useCallback((polygon, area) => {
-    console.log("Polygon created with area:", area);
+    console.log("Polygon created with area:", area, "Backend area:", formData.initialRoofSize);
     
-    // Use polygon calculated area if it's reasonable
-    if (area && area > 500 && area < 10000) {
-      if (formData.roofSize !== area) {
-        console.log("Setting roof size to calculated polygon area:", area);
-        updateFormData('roofSize', area);
-        setLocalRoofSize(area);
+    // Always store the polygon-calculated area separately
+    updateFormData('polygonArea', area);
+    
+    // Compare with backend calculation if available
+    const backendSize = formData.initialRoofSize;
+    
+    if (backendSize) {
+      const polygonSize = area || 0;
+      const sizeRatio = polygonSize / backendSize;
+      
+      // Log the discrepancy for monitoring
+      if (formData.address && window.logMeasurementDiscrepancy) {
+        logMeasurementDiscrepancy(backendSize, polygonSize, formData.address);
       }
+      
+      // Significant discrepancy - use backend value as it's more reliable
+      if (!area || sizeRatio < 0.7 || sizeRatio > 1.3) {
+        console.log("Large discrepancy detected, using backend size:", backendSize);
+        updateFormData('roofSize', backendSize);
+        setLocalRoofSize(backendSize);
+        updateFormData('sizingMethod', 'backend_override');
+        updateFormData('sizingNotes', `Polygon calculation (${area} sq ft) differed from backend (${backendSize} sq ft)`);
+        return;
+      }
+    }
+    
+    // Use polygon area when it's reasonable or we don't have backend data
+    if (area && area > 500 && area < 10000) {
+      console.log("Using polygon-calculated area:", area);
+      updateFormData('roofSize', area);
+      setLocalRoofSize(area);
+      updateFormData('sizingMethod', 'polygon_calculated');
+    } else if (estimatedSizeFromProperty) {
+      // Fall back to property-based estimation
+      console.log("Using property-based estimation:", estimatedSizeFromProperty);
+      updateFormData('roofSize', estimatedSizeFromProperty);
+      setLocalRoofSize(estimatedSizeFromProperty);
+      updateFormData('sizingMethod', 'property_estimated');
     } else if (formData.initialRoofSize) {
-      // Use initial roof size as fallback
-      console.log("Using initial roof size:", formData.initialRoofSize);
+      // Last resort, use initial backend value
       updateFormData('roofSize', formData.initialRoofSize);
       setLocalRoofSize(formData.initialRoofSize);
+      updateFormData('sizingMethod', 'backend_initial');
     }
-  }, [formData.roofSize, formData.initialRoofSize, updateFormData]);
+  }, [formData.initialRoofSize, formData.address, estimatedSizeFromProperty, updateFormData]);
 
   // Toggle automatic/manual size
   const handleToggleAutoSize = useCallback((e) => {
@@ -164,19 +196,19 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     // Restore roof size based on different sources when returning to auto
     if (isAuto) {
       // Priority: 
-      // 1. Use polygon-calculated area if valid
-      // 2. Use analysis-based size if available
+      // 1. Use backend-calculated area if available
+      // 2. Use polygon-calculated area if valid
       // 3. Use property-based calculation if available
       // 4. Fall back to initial size
       
-      if (formData.polygonArea && formData.polygonArea > 500) {
+      if (formData.initialRoofSize) {
+        console.log("Restoring backend-calculated roof size");
+        updateFormData('roofSize', formData.initialRoofSize);
+        setLocalRoofSize(formData.initialRoofSize);
+      } else if (formData.polygonArea && formData.polygonArea > 500) {
         console.log("Restoring polygon-calculated area");
         updateFormData('roofSize', formData.polygonArea);
         setLocalRoofSize(formData.polygonArea);
-      } else if (formData.initialRoofSize) {
-        console.log("Restoring initial roof size");
-        updateFormData('roofSize', formData.initialRoofSize);
-        setLocalRoofSize(formData.initialRoofSize);
       } else if (estimatedSizeFromProperty) {
         console.log("Restoring property-based estimation");
         updateFormData('roofSize', estimatedSizeFromProperty);
