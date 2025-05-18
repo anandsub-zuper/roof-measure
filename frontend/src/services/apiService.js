@@ -1,4 +1,4 @@
-// src/services/apiService.js - Complete file
+// src/services/apiService.js - Updated getRoofSizeEstimate function
 import axios from 'axios';
 
 // Get API URL from environment or default to empty string (relative URLs)
@@ -106,6 +106,7 @@ export const getAddressCoordinates = async (address, propertyData = null) => {
 
 /**
  * Get roof size estimate based on coordinates
+ * FIXED: Now tries OpenAI Vision first before falling back to basic estimation
  * @param {number} lat - Latitude
  * @param {number} lng - Longitude
  * @param {Object} propertyData - Optional property data for better estimation
@@ -130,7 +131,7 @@ export const getRoofSizeEstimate = async (lat, lng, propertyData = null) => {
     // Add property data if available for better backend estimation
     if (propertyData) {
       requestData.propertyData = {
-        buildingType: propertyData.propertyType,
+        propertyType: propertyData.propertyType,
         buildingSize: propertyData.buildingSize,
         stories: propertyData.stories,
         yearBuilt: propertyData.yearBuilt,
@@ -138,20 +139,57 @@ export const getRoofSizeEstimate = async (lat, lng, propertyData = null) => {
       };
     }
     
-    // Make API request
+    // FIXED: First try to use OpenAI Vision analysis for better accuracy
+    try {
+      console.log("Attempting OpenAI Vision roof analysis");
+      const visionResponse = await api.post('/api/roof/analyze', requestData);
+      console.log("OpenAI Vision response:", visionResponse.data);
+      
+      if (visionResponse.data && visionResponse.data.success) {
+        console.log("OpenAI Vision analysis successful");
+        
+        // Add method info to be displayed to the user
+        const visionResult = visionResponse.data.data || visionResponse.data;
+        visionResult.roofAnalysisMethod = "openai_vision";
+        
+        // Store roof shape and pitch for UI display
+        visionResult.roofShape = visionResult.roofShape || "unknown";
+        visionResult.roofPitch = visionResult.estimatedPitch || "unknown";
+        
+        // Convert size field name if needed
+        if (visionResult.roofArea && !visionResult.size) {
+          visionResult.size = visionResult.roofArea;
+        }
+        
+        // Cache the result
+        if (!addressCache[coordKey]) addressCache[coordKey] = {};
+        addressCache[coordKey].roofSize = visionResult;
+        
+        return visionResult;
+      }
+    } catch (visionError) {
+      console.warn("Vision analysis failed, falling back to basic estimation:", visionError.message);
+    }
+    
+    // Fallback to simple estimation if Vision API fails
+    console.log("Using basic roof size estimation");
     const response = await api.post('/api/maps/roof-size', requestData);
-    console.log("Raw roof size response:", response.data);
+    console.log("Basic roof size response:", response.data);
     
     // Check if the response has the success property
     if (response.data && response.data.success === false) {
       throw new Error(response.data.message || "Roof size estimation failed");
     }
     
+    // Add method info to result
+    const basicResult = response.data;
+    basicResult.roofAnalysisMethod = "basic_estimation";
+    
     // Cache the result
     if (!addressCache[coordKey]) addressCache[coordKey] = {};
-    addressCache[coordKey].roofSize = response.data;
+    addressCache[coordKey].roofSize = basicResult;
     
-    return response.data;
+    return basicResult;
   } catch (error) {
     console.error('Error estimating roof size:', error);
     throw error;
@@ -196,12 +234,12 @@ export const analyzeRoof = async (lat, lng, propertyData = null) => {
     console.log("Roof analysis response:", response.data);
     
     // Extract the recommended result or use the directly returned data
-    const result = response.data.data.recommended || response.data.data;
+    const result = response.data.data?.recommended || response.data.data || response.data;
     
     // Format the response
     const analysisResult = {
       success: true,
-      size: result.roofArea,
+      size: result.roofArea || result.size,
       roofPolygon: result.roofPolygon,
       confidence: result.confidence,
       roofShape: result.roofShape,
