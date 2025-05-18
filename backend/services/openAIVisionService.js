@@ -63,7 +63,7 @@ const analyzeRoofFromImage = async (imageBase64, propertyData, lat, lng) => {
     
     // Call OpenAI Vision API
     const response = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
