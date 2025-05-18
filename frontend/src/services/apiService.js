@@ -1,7 +1,14 @@
-// src/services/apiService.js - Updated getRoofSizeEstimate function
+// src/services/apiService.js
 import axios from 'axios';
+import config from '../config';
 
-// Get API URL from environment or default to empty string (relative URLs)
+// Feature flags for endpoints
+const API_FEATURE_FLAGS = {
+  VISION_API_ENABLED: true,   // Set to true now that we've added the endpoint
+  METRICS_LOGGING_ENABLED: true  // Set to true now that we've added the endpoint
+};
+
+// Get API URL from environment or default to relative URL
 const API_URL = process.env.REACT_APP_API_URL || 
   (window.location.hostname === 'localhost' 
     ? 'http://localhost:5000' 
@@ -18,13 +25,44 @@ const api = axios.create({
   timeout: 15000 // 15 second timeout
 });
 
-// Add response interceptor for consistent error handling
+// Add request interceptor for timing metrics
+api.interceptors.request.use(config => {
+  config.metadata = { startTime: new Date().getTime() };
+  return config;
+}, error => {
+  return Promise.reject(error);
+});
+
+// Add response interceptor for consistent error handling and metrics
 api.interceptors.response.use(
-  response => response,
+  response => {
+    // Calculate request duration for metrics
+    const endTime = new Date().getTime();
+    const duration = endTime - response.config.metadata.startTime;
+    
+    // Log timing metrics for significant requests
+    if (duration > 500 && API_FEATURE_FLAGS.METRICS_LOGGING_ENABLED) {
+      safelyLogMetrics('api_timing', {
+        endpoint: response.config.url,
+        duration,
+        status: response.status
+      });
+    }
+    
+    return response;
+  },
   error => {
     // Log the error with useful information
     if (error.response) {
       console.error(`API Error (${error.response.status}):`, error.response.data);
+      
+      // Log 404 errors to metrics to track missing endpoints
+      if (error.response.status === 404 && API_FEATURE_FLAGS.METRICS_LOGGING_ENABLED) {
+        safelyLogMetrics('missing_endpoint', {
+          endpoint: error.config.url,
+          method: error.config.method
+        });
+      }
     } else if (error.request) {
       console.error('API Error: No response received', error.request);
     } else {
@@ -36,6 +74,90 @@ api.interceptors.response.use(
 
 // In-memory cache for address data
 const addressCache = {};
+
+/**
+ * Safely log metrics without crashing if endpoint is missing
+ * @param {string} type - Metric type
+ * @param {Object} data - Metric data
+ */
+export const safelyLogMetrics = (type, data) => {
+  // Always log to console
+  console.log(`METRICS [${type}]:`, data);
+  
+  // Only try API call if enabled
+  if (API_FEATURE_FLAGS.METRICS_LOGGING_ENABLED) {
+    try {
+      api.post('/api/metrics/log', {
+        type,
+        ...data,
+        timestamp: new Date().toISOString()
+      }).catch(err => {
+        // Silently handle 404s - endpoint might still be deploying
+        if (err.response && err.response.status !== 404) {
+          console.warn("Metrics logging failed:", err.message);
+        }
+      });
+    } catch (e) {
+      // Silently fail - metrics should never affect UX
+    }
+  }
+};
+
+/**
+ * Log measurement discrepancy between backend and frontend
+ * @param {number} backendSize - Size from backend calculation
+ * @param {number} frontendSize - Size from frontend calculation
+ * @param {string} address - Property address
+ */
+export const logMeasurementDiscrepancy = (backendSize, frontendSize, address) => {
+  if (!backendSize || !frontendSize || !address) return;
+  
+  const ratio = frontendSize / backendSize;
+  const discrepancy = Math.abs(frontendSize - backendSize);
+  const percentDiff = Math.abs((frontendSize - backendSize) / backendSize) * 100;
+  
+  // Log to console for debugging
+  console.log(`Measurement discrepancy: ${percentDiff.toFixed(1)}% (${discrepancy} sq ft)`);
+  console.log(`Backend: ${backendSize} sq ft, Frontend: ${frontendSize} sq ft, Ratio: ${ratio.toFixed(2)}`);
+  
+  // Only include street number for privacy
+  const anonymizedAddress = address.split(',')[0].trim();
+  
+  // Log to backend
+  safelyLogMetrics('measurement_discrepancy', {
+    backendSize,
+    frontendSize,
+    ratio,
+    percentDiff,
+    address: anonymizedAddress
+  });
+  
+  // Add to local storage for monitoring large discrepancies
+  if (percentDiff > 25) {
+    console.warn(`Large measurement discrepancy detected: ${percentDiff.toFixed(1)}%`);
+    
+    try {
+      const discrepancies = JSON.parse(localStorage.getItem('roofai_discrepancies') || '[]');
+      discrepancies.push({
+        backendSize,
+        frontendSize,
+        ratio,
+        percentDiff,
+        address: anonymizedAddress,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Keep only the last 50 entries
+      if (discrepancies.length > 50) {
+        discrepancies.shift();
+      }
+      
+      localStorage.setItem('roofai_discrepancies', JSON.stringify(discrepancies));
+    } catch (e) {
+      // Ignore storage errors
+    }
+  }
+};
 
 /**
  * Test the API connection
@@ -106,7 +228,7 @@ export const getAddressCoordinates = async (address, propertyData = null) => {
 
 /**
  * Get roof size estimate based on coordinates
- * FIXED: Now tries OpenAI Vision first before falling back to basic estimation
+ * UPDATED: Now attempts OpenAI Vision analysis first before falling back
  * @param {number} lat - Latitude
  * @param {number} lng - Longitude
  * @param {Object} propertyData - Optional property data for better estimation
@@ -128,7 +250,7 @@ export const getRoofSizeEstimate = async (lat, lng, propertyData = null) => {
     // Prepare request data
     const requestData = { lat, lng };
     
-    // Add property data if available for better backend estimation
+    // Add property data if available for better estimation
     if (propertyData) {
       requestData.propertyData = {
         propertyType: propertyData.propertyType,
@@ -139,39 +261,47 @@ export const getRoofSizeEstimate = async (lat, lng, propertyData = null) => {
       };
     }
     
-    // FIXED: First try to use OpenAI Vision analysis for better accuracy
-    try {
-      console.log("Attempting OpenAI Vision roof analysis");
-      const visionResponse = await api.post('/api/roof/analyze', requestData);
-      console.log("OpenAI Vision response:", visionResponse.data);
-      
-      if (visionResponse.data && visionResponse.data.success) {
-        console.log("OpenAI Vision analysis successful");
+    // Attempt OpenAI Vision analysis first if enabled
+    if (API_FEATURE_FLAGS.VISION_API_ENABLED) {
+      try {
+        console.log("Attempting OpenAI Vision roof analysis");
+        const visionResponse = await api.post('/api/roof/analyze', requestData);
+        console.log("OpenAI Vision response:", visionResponse.data);
         
-        // Add method info to be displayed to the user
-        const visionResult = visionResponse.data.data || visionResponse.data;
-        visionResult.roofAnalysisMethod = "openai_vision";
-        
-        // Store roof shape and pitch for UI display
-        visionResult.roofShape = visionResult.roofShape || "unknown";
-        visionResult.roofPitch = visionResult.estimatedPitch || "unknown";
-        
-        // Convert size field name if needed
-        if (visionResult.roofArea && !visionResult.size) {
-          visionResult.size = visionResult.roofArea;
+        if (visionResponse.data && visionResponse.data.success) {
+          console.log("OpenAI Vision analysis successful");
+          
+          // Extract the result - handle both direct and recommended formats
+          const visionResult = visionResponse.data.data?.recommended || visionResponse.data.data;
+          
+          // Format and normalize response
+          const formattedResult = {
+            success: true,
+            size: visionResult.roofArea,
+            roofPolygon: visionResult.roofPolygon,
+            accuracy: visionResult.confidence,
+            method: visionResult.method || "openai_vision",
+            roofShape: visionResult.roofShape,
+            roofPitch: visionResult.estimatedPitch,
+            roofAnalysisMethod: visionResult.method,
+            roofAnalysisNotes: visionResult.notes
+          };
+          
+          // Cache the result
+          if (!addressCache[coordKey]) addressCache[coordKey] = {};
+          addressCache[coordKey].roofSize = formattedResult;
+          
+          return formattedResult;
         }
-        
-        // Cache the result
-        if (!addressCache[coordKey]) addressCache[coordKey] = {};
-        addressCache[coordKey].roofSize = visionResult;
-        
-        return visionResult;
+      } catch (visionError) {
+        // Only log the error, don't rethrow - we'll try the backup method
+        console.warn("Vision analysis failed, falling back to basic estimation:", visionError.message);
       }
-    } catch (visionError) {
-      console.warn("Vision analysis failed, falling back to basic estimation:", visionError.message);
+    } else {
+      console.log("Vision API disabled, using basic estimation");
     }
     
-    // Fallback to simple estimation if Vision API fails
+    // Fallback to basic roof size estimation
     console.log("Using basic roof size estimation");
     const response = await api.post('/api/maps/roof-size', requestData);
     console.log("Basic roof size response:", response.data);
@@ -181,9 +311,15 @@ export const getRoofSizeEstimate = async (lat, lng, propertyData = null) => {
       throw new Error(response.data.message || "Roof size estimation failed");
     }
     
-    // Add method info to result
-    const basicResult = response.data;
-    basicResult.roofAnalysisMethod = "basic_estimation";
+    // Format the response for consistency
+    const basicResult = {
+      success: true,
+      size: response.data.size,
+      roofPolygon: response.data.roofPolygon,
+      accuracy: response.data.accuracy,
+      method: response.data.method,
+      roofAnalysisMethod: "basic_estimation"
+    };
     
     // Cache the result
     if (!addressCache[coordKey]) addressCache[coordKey] = {};
@@ -233,25 +369,19 @@ export const analyzeRoof = async (lat, lng, propertyData = null) => {
     const response = await api.post('/api/roof/analyze', requestData);
     console.log("Roof analysis response:", response.data);
     
-    // Extract the recommended result or use the directly returned data
-    const result = response.data.data?.recommended || response.data.data || response.data;
+    // Check for recommended result
+    if (response.data.data?.recommended) {
+      console.log("Using recommended analysis method:", response.data.data.recommended.method);
+      return formatAnalysisResult(response.data.data.recommended);
+    }
     
-    // Format the response
-    const analysisResult = {
-      success: true,
-      size: result.roofArea || result.size,
-      roofPolygon: result.roofPolygon,
-      confidence: result.confidence,
-      roofShape: result.roofShape,
-      estimatedPitch: result.estimatedPitch,
-      method: result.method,
-      notes: result.notes
-    };
+    // Otherwise use the direct result
+    const result = formatAnalysisResult(response.data.data);
     
     // Cache the result
-    addressCache[coordKey] = analysisResult;
+    addressCache[coordKey] = result;
     
-    return analysisResult;
+    return result;
   } catch (error) {
     console.error('Error analyzing roof:', error);
     
@@ -293,6 +423,20 @@ export const analyzeRoof = async (lat, lng, propertyData = null) => {
   }
 };
 
+// Helper to format analysis result consistently
+const formatAnalysisResult = (result) => {
+  return {
+    success: true,
+    size: result.roofArea,
+    roofPolygon: result.roofPolygon,
+    confidence: result.confidence,
+    roofShape: result.roofShape,
+    estimatedPitch: result.estimatedPitch,
+    method: result.method,
+    notes: result.notes
+  };
+};
+
 /**
  * Generate a roof estimate based on form data
  * @param {Object} formData - The form data from all steps
@@ -309,7 +453,7 @@ export const generateRoofEstimate = async (formData) => {
     if (formData.propertyData) {
       // Include only relevant property data fields to reduce payload size
       requestData.propertyData = {
-        buildingType: formData.propertyData.propertyType,
+        propertyType: formData.propertyData.propertyType,
         buildingSize: formData.propertyData.buildingSize,
         stories: formData.propertyData.stories,
         yearBuilt: formData.propertyData.yearBuilt,
@@ -351,7 +495,7 @@ export const submitEstimate = async (data) => {
     // Include property data if available
     if (data.propertyData) {
       requestData.propertyData = {
-        buildingType: data.propertyData.propertyType,
+        propertyType: data.propertyData.propertyType,
         buildingSize: data.propertyData.buildingSize,
         stories: data.propertyData.stories,
         yearBuilt: data.propertyData.yearBuilt,
@@ -384,6 +528,35 @@ export const clearAddressCache = () => {
   console.log("Address cache cleared");
 };
 
+/**
+ * Get stored measurement discrepancies (for debugging)
+ * @returns {Array} - Array of discrepancy objects
+ */
+export const getStoredDiscrepancies = () => {
+  try {
+    return JSON.parse(localStorage.getItem('roofai_discrepancies') || '[]');
+  } catch (e) {
+    return [];
+  }
+};
+
+/**
+ * Clear stored discrepancies
+ */
+export const clearStoredDiscrepancies = () => {
+  localStorage.removeItem('roofai_discrepancies');
+};
+
+// Make the functions globally accessible for debugging in development
+if (process.env.NODE_ENV === 'development') {
+  window.roofAIApi = {
+    clearAddressCache,
+    getStoredDiscrepancies,
+    clearStoredDiscrepancies,
+    API_FEATURE_FLAGS
+  };
+}
+
 // Export the service functions
 const apiService = {
   testApiConnection,
@@ -392,7 +565,10 @@ const apiService = {
   analyzeRoof,
   generateRoofEstimate,
   submitEstimate,
-  clearAddressCache
+  clearAddressCache,
+  getStoredDiscrepancies,
+  clearStoredDiscrepancies,
+  logMeasurementDiscrepancy
 };
 
 export default apiService;
