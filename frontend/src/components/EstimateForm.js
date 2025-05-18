@@ -1,4 +1,5 @@
-// src/components/EstimateForm.js
+// EstimateForm.js - Fixed version
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
@@ -17,8 +18,6 @@ import ContactInfoStep from './steps/ContactInfoStep';
 
 // Import services
 import apiService from '../services/apiService';
-import googleMapsService from '../services/googleMapsService';
-import openAIService from '../services/openAIService';
 
 const EstimateForm = () => {
   const navigate = useNavigate();
@@ -49,13 +48,6 @@ const EstimateForm = () => {
     termsAgreed: false
   });
   
-  // Initialize Google Maps API
-  useEffect(() => {
-    googleMapsService.loadGoogleMapsScript(() => {
-      console.log('Google Maps API loaded');
-    });
-  }, []);
-  
   // Update form data
   const updateFormData = useCallback((field, value) => {
     setFormData(prev => ({
@@ -64,6 +56,20 @@ const EstimateForm = () => {
     }));
   }, []);
   
+  // Define steps array early - before it's used in other functions
+  const steps = [
+    { component: AddressStep, title: 'Your Address' },
+    { component: RoofSizeStep, title: 'Roof Size' },
+    { component: RoofSteepnessStep, title: 'Roof Steepness' },
+    { component: BuildingTypeStep, title: 'Building Type' },
+    { component: CurrentRoofMaterialStep, title: 'Current Roofing' },
+    { component: DesiredRoofMaterialStep, title: 'New Roofing' },
+    { component: TimelineStep, title: 'Timeline' },
+    { component: FinancingStep, title: 'Financing' },
+    { component: EstimateResultStep, title: 'Your Estimate' },
+    { component: ContactInfoStep, title: 'Contact Info' }
+  ];
+  
   // Navigate to next step
   const nextStep = useCallback(async () => {
     // Special handling for certain steps
@@ -71,24 +77,28 @@ const EstimateForm = () => {
       setIsLoading(true);
       try {
         // Get coordinates from address
-        const coords = await googleMapsService.getAddressCoordinates(formData.address);
+        const addressData = await apiService.getAddressCoordinates(formData.address);
         
-        // In a real app, this would use the Google Geocoding API response
-        // Parse address components manually for now
-        const addressParts = formData.address.split(',');
-        const state = addressParts.length > 1 ? addressParts[addressParts.length - 2].trim().split(' ')[0] : '';
-        const zipCode = addressParts.length > 1 ? addressParts[addressParts.length - 2].trim().split(' ')[1] : '';
-        const city = addressParts.length > 2 ? addressParts[addressParts.length - 3].trim() : '';
+        // Update form with coordinates and address components
+        if (addressData && addressData.data) {
+          updateFormData('lat', addressData.data.lat);
+          updateFormData('lng', addressData.data.lng);
+          updateFormData('city', addressData.data.city || '');
+          updateFormData('state', addressData.data.state || '');
+          updateFormData('zipCode', addressData.data.zipCode || '');
+        }
         
-        updateFormData('lat', coords.lat);
-        updateFormData('lng', coords.lng);
-        updateFormData('city', city);
-        updateFormData('state', state);
-        updateFormData('zipCode', zipCode);
-        
-        // Automatically estimate roof size from satellite imagery
-        const roofSize = await googleMapsService.getRoofSizeEstimate(coords.lat, coords.lng);
-        updateFormData('roofSize', roofSize);
+        // Estimate roof size if coordinates are available
+        if (addressData && addressData.data && addressData.data.lat && addressData.data.lng) {
+          const roofSizeData = await apiService.getRoofSizeEstimate(
+            addressData.data.lat, 
+            addressData.data.lng
+          );
+          
+          if (roofSizeData && roofSizeData.data) {
+            updateFormData('roofSize', roofSizeData.data.size || 3000);
+          }
+        }
       } catch (error) {
         console.error("Error processing address:", error);
         alert("There was an error processing your address. Please try again.");
@@ -102,8 +112,10 @@ const EstimateForm = () => {
     if (currentStep === 7) {
       setIsLoading(true);
       try {
-        const estimate = await openAIService.generateRoofEstimate(formData);
-        setEstimateResult(estimate);
+        const estimateResponse = await apiService.generateRoofEstimate(formData);
+        if (estimateResponse && estimateResponse.data) {
+          setEstimateResult(estimateResponse.data);
+        }
       } catch (error) {
         console.error("Error generating estimate:", error);
         alert("There was an error generating your estimate. Please try again.");
@@ -113,6 +125,7 @@ const EstimateForm = () => {
       setIsLoading(false);
     }
     
+    // Move to next step
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
   }, [currentStep, formData, updateFormData, steps.length]);
   
@@ -122,25 +135,34 @@ const EstimateForm = () => {
   }, []);
   
   // Submit form
-  const handleSubmit = useCallback(() => {
-    // In a real app, this would send the data to a server
-    // Navigate to thank you page
-    navigate('/thank-you');
-  }, [navigate]);
+  const handleSubmit = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await apiService.submitEstimate({
+        ...formData,
+        estimateResult
+      });
+      navigate('/thank-you');
+    } catch (error) {
+      console.error("Error submitting form:", error);
+      alert("There was an error submitting your information. Please try again.");
+      setIsLoading(false);
+    }
+  }, [formData, estimateResult, navigate]);
   
-  // Define all form steps
-  const steps = [
-    { component: AddressStep, title: 'Your Address' },
-    { component: RoofSizeStep, title: 'Roof Size' },
-    { component: RoofSteepnessStep, title: 'Roof Steepness' },
-    { component: BuildingTypeStep, title: 'Building Type' },
-    { component: CurrentRoofMaterialStep, title: 'Current Roofing' },
-    { component: DesiredRoofMaterialStep, title: 'New Roofing' },
-    { component: TimelineStep, title: 'Timeline' },
-    { component: FinancingStep, title: 'Financing' },
-    { component: EstimateResultStep, title: 'Your Estimate' },
-    { component: ContactInfoStep, title: 'Contact Info' }
-  ];
+  // Test API connection on component mount
+  useEffect(() => {
+    const testApi = async () => {
+      try {
+        await apiService.testApiConnection();
+        console.log("API connection successful!");
+      } catch (error) {
+        console.error("API connection failed:", error);
+      }
+    };
+    
+    testApi();
+  }, []);
   
   // Get current step component
   const CurrentStepComponent = steps[currentStep].component;
@@ -191,9 +213,9 @@ const EstimateForm = () => {
             Powered by AI • Satellite Data • Local Market Analysis
           </p>
           <div className="flex space-x-4">
-          <a href="/privacy" className="text-sm text-gray-600 hover:text-primary-600">Privacy Policy</a>
-          <a href="/terms" className="text-sm text-gray-600 hover:text-primary-600">Terms of Service</a>
-          <a href="/contact" className="text-sm text-gray-600 hover:text-primary-600">Contact</a>
+            <a href="/privacy" className="text-sm text-gray-600 hover:text-primary-600">Privacy Policy</a>
+            <a href="/terms" className="text-sm text-gray-600 hover:text-primary-600">Terms of Service</a>
+            <a href="/contact" className="text-sm text-gray-600 hover:text-primary-600">Contact</a>
           </div>
         </div>
       </footer>
