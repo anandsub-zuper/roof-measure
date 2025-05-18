@@ -1,5 +1,5 @@
 // src/components/map/DummyMapContainer.js
-import React, { forwardRef, useImperativeHandle } from 'react';
+import React, { forwardRef, useImperativeHandle, useEffect } from 'react';
 import { MapPin } from 'lucide-react';
 
 const DummyMapContainer = forwardRef(({ 
@@ -16,14 +16,18 @@ const DummyMapContainer = forwardRef(({
     getMapInstance: () => null
   }));
 
-  // Call callbacks immediately with dummy data
-  React.useEffect(() => {
-    // Notify parent the "map" is ready
-    onMapReady && onMapReady();
+  // Call callbacks on mount
+  useEffect(() => {
+    // Generate a random area between 2500-3500 sq ft for realistic estimates
+    const randomArea = Math.floor(2500 + Math.random() * 1000);
     
-    // Provide a reasonable roof size
-    const defaultArea = Math.floor(2000 + Math.random() * 2000); // Random between 2000-4000
-    onPolygonCreated && onPolygonCreated(null, defaultArea);
+    // Notify parent the "map" is ready
+    setTimeout(() => {
+      onMapReady && onMapReady();
+      
+      // Provide a reasonable roof size
+      onPolygonCreated && onPolygonCreated(null, randomArea);
+    }, 500); // Short delay for more natural feeling
   }, [onMapReady, onPolygonCreated]);
 
   return (
