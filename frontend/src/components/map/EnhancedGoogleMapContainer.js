@@ -1,17 +1,17 @@
-// Fix for EnhancedGoogleMapContainer.js polygon scaling issue
-// In your frontend/src/components/map/EnhancedGoogleMapContainer.js
+// frontend/src/components/map/EnhancedGoogleMapContainer.js - Full updated version
 
 import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import config from '../../config';
 import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
+import polygonDebugTool from '../../utils/polygonDebugTool';
 
-const FixedGoogleMapContainer = forwardRef(({ 
+const EnhancedGoogleMapContainer = forwardRef(({ 
   lat, 
   lng, 
   address, 
   roofSize,
   roofPolygon,
-  propertyData,
+  propertyData, // Property data from Rentcast API
   enableDrawing = false,
   onMapReady, 
   onMapError, 
@@ -24,11 +24,11 @@ const FixedGoogleMapContainer = forwardRef(({
   const [errorMessage, setErrorMessage] = useState(null);
   const [loadingTimeout, setLoadingTimeout] = useState(null);
   
-  console.log("FixedGoogleMapContainer rendering with props:", { 
+  console.log("EnhancedGoogleMapContainer rendering with props:", { 
     lat, lng, address, roofSize,
-    hasRoofPolygon: !!roofPolygon,
+    hasRoofPolygon: !!roofPolygon && Array.isArray(roofPolygon),
     hasPropertyData: !!propertyData,
-    propertyType: propertyData?.propertyType
+    propertyType: propertyData?.propertyType || 'unknown'
   });
   
   // Exposed methods
@@ -100,18 +100,28 @@ const FixedGoogleMapContainer = forwardRef(({
   
   // Function to create accurate polygon based on roof size or provided coords
   const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
-    // If we have polygon coordinates from the backend, use them but FIX THEM
+    console.log("Creating roof polygon with:", {
+      size,
+      hasProvidedPolygon: !!providedPolygon && Array.isArray(providedPolygon),
+      hasPropertyData: !!(currentPropertyData || propertyData)
+    });
+    
+    // If we have polygon coordinates from the backend, use them but fix scaling issues
     if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
-      console.log("Using provided roof polygon coordinates WITH FIXES");
+      console.log("Using provided roof polygon coordinates");
       
-      // NEW: Fix the provided polygon if needed
-      // This uses our new utility function to fix the scale
-      return propertyPolygonGenerator.fixProvidedPolygon(
-        providedPolygon,
-        validLat,
-        validLng,
-        size
-      );
+      // Debug the original polygon
+      console.log("Original backend polygon:");
+      polygonDebugTool.debugPolygon(providedPolygon, size);
+      
+      // Use our debug tool to fix polygon scaling
+      const fixedPolygon = polygonDebugTool.fixPolygonScaling(providedPolygon, size);
+      
+      // Debug the fixed polygon
+      console.log("Fixed polygon:");
+      polygonDebugTool.debugPolygon(fixedPolygon, size);
+      
+      return fixedPolygon;
     }
     
     // Use property data for better polygon generation (use passed data or component prop)
@@ -119,17 +129,29 @@ const FixedGoogleMapContainer = forwardRef(({
     
     if (dataToUse) {
       console.log("Using property data for enhanced polygon generation:", dataToUse.propertyType);
-      return propertyPolygonGenerator.generatePropertyPolygon(
+      
+      // Generate property-specific polygon
+      const propertyPolygon = propertyPolygonGenerator.generatePropertyPolygon(
         validLat, 
         validLng, 
         size, 
         dataToUse
       );
+      
+      // Debug the property-based polygon
+      polygonDebugTool.debugPolygon(propertyPolygon, size);
+      
+      return propertyPolygon;
     }
     
     // Fallback to size-based polygon generation
     console.log("Using size-based polygon generation");
-    return propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
+    const sizeBasedPolygon = propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
+    
+    // Debug the size-based polygon
+    polygonDebugTool.debugPolygon(sizeBasedPolygon, size);
+    
+    return sizeBasedPolygon;
   };
   
   // Calculate polygon area in square feet
@@ -177,24 +199,9 @@ const FixedGoogleMapContainer = forwardRef(({
         }
       }
       
-      // Calculate area in square meters
+      // Calculate area using Google Maps geometry library
       const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
       // Convert to square feet (1 sq meter = 10.7639 sq feet)
-      
-      // FIXED: Reduced the scale factor to avoid over-correction
-      let scaleFactor = 0.4;
-      
-      if (dataToUse) {
-        // Get building-specific scale factor
-        const buildingSize = dataToUse.buildingSize || roofSize;
-        if (buildingSize < 1200) scaleFactor = 0.45;
-        else if (buildingSize < 3000) scaleFactor = 0.42;
-        else if (buildingSize < 5000) scaleFactor = 0.4;
-        else scaleFactor = 0.38;
-      }
-      
-      // Apply reverse scaling to match actual building footprint
-      // FIXED: Removed the scaling correction since we're now scaling the polygon directly
       const areaInSquareFeet = Math.round(areaInSquareMeters * 10.7639);
       
       console.log("Calculated polygon area:", areaInSquareFeet, "sq ft");
@@ -332,11 +339,35 @@ const FixedGoogleMapContainer = forwardRef(({
           });
           setMarkerInstance(marker);
           
+          // Run test code to verify polygon debug tool works
+          if (process.env.NODE_ENV === 'development') {
+            console.group("🔍 DEBUG: Polygon Debug Tool Test");
+            const testPolygon = polygonDebugTool.generateTestPolygon(validLat, validLng, roofSize);
+            console.log("Test polygon generated for", roofSize, "sq ft:");
+            polygonDebugTool.debugPolygon(testPolygon, roofSize);
+              
+            // Scale it improperly to simulate the issue
+            const scaledDown = testPolygon.map(point => {
+              return {
+                lat: validLat + (point.lat - validLat) * 0.1,
+                lng: validLng + (point.lng - validLng) * 0.1
+              };
+            });
+            console.log("Scaled down polygon (simulating issue):");
+            polygonDebugTool.debugPolygon(scaledDown, roofSize);
+              
+            // Fix it using the tool
+            const fixed = polygonDebugTool.fixPolygonScaling(scaledDown, roofSize);
+            console.log("Fixed polygon:");
+            polygonDebugTool.debugPolygon(fixed, roofSize);
+            console.groupEnd();
+          }
+          
           // Create polygon using roof coordinates or estimate
           const polygonCoords = createRoofPolygon(validLat, validLng, roofSize, roofPolygon);
           
-          // FIXED: Debug the polygon coordinates
-          console.log("Generated polygon coordinates:", JSON.stringify(polygonCoords));
+          // Debug the final polygon coordinates
+          console.log("Final polygon coordinates for map display:", JSON.stringify(polygonCoords));
           
           // Create the polygon on the map
           const polygon = new window.google.maps.Polygon({
@@ -515,6 +546,6 @@ const FixedGoogleMapContainer = forwardRef(({
   );
 });
 
-FixedGoogleMapContainer.displayName = 'FixedGoogleMapContainer';
+EnhancedGoogleMapContainer.displayName = 'EnhancedGoogleMapContainer';
 
-export default FixedGoogleMapContainer;
+export default EnhancedGoogleMapContainer;
