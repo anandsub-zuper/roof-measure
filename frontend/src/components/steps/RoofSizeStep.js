@@ -7,6 +7,7 @@ import GoogleMapContainer from '../map/GoogleMapContainer';
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [skipMap, setSkipMap] = useState(false);
   const mapContainerRef = useRef(null);
   
   console.log("RoofSizeStep rendering with formData:", {
@@ -25,6 +26,11 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     console.error("Map error:", errorMessage);
     setError(errorMessage);
     setLoading(false);
+    
+    // If we get a map error, set a reasonable default roof size if none exists
+    if (!formData.roofSize || formData.roofSize === '') {
+      updateFormData('roofSize', 3000);
+    }
   };
 
   // Handle polygon creation with fallback
@@ -64,6 +70,17 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   };
 
+  const handleSkipMap = () => {
+    setSkipMap(true);
+    
+    // Set a default roof size if none exists
+    if (!formData.roofSize || formData.roofSize === '') {
+      updateFormData('roofSize', 3000);
+    }
+    
+    setLoading(false);
+  };
+
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
@@ -71,7 +88,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       
       {/* Map Container with Satellite View */}
       <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
-        {hasValidCoordinates() ? (
+        {hasValidCoordinates() && !skipMap ? (
           <GoogleMapContainer
             ref={mapContainerRef}
             lat={formData.lat}
@@ -84,18 +101,30 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
             <Camera size={40} className="mb-2 text-gray-400" />
-            <p className="text-gray-500">No coordinates available</p>
-            <p className="text-xs text-gray-400 mt-2">
-              {JSON.stringify({lat: formData.lat, lng: formData.lng})}
-            </p>
+            {skipMap ? (
+              <p className="text-gray-500">Map view skipped</p>
+            ) : (
+              <>
+                <p className="text-gray-500">No coordinates available</p>
+                <p className="text-xs text-gray-400 mt-2">
+                  {JSON.stringify({lat: formData.lat, lng: formData.lng})}
+                </p>
+              </>
+            )}
           </div>
         )}
         
         {/* Loading overlay */}
-        {hasValidCoordinates() && loading && !error && (
+        {hasValidCoordinates() && loading && !error && !skipMap && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Loading satellite imagery...</p>
+            <button 
+              onClick={handleSkipMap} 
+              className="mt-4 text-xs text-blue-500 hover:text-blue-700 underline"
+            >
+              Skip map view
+            </button>
           </div>
         )}
         
@@ -109,7 +138,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         )}
 
         {/* Zoom controls */}
-        {hasValidCoordinates() && !loading && (
+        {hasValidCoordinates() && !loading && !skipMap && !error && (
           <div className="absolute top-2 right-2 flex flex-col z-20">
             <button
               type="button"
@@ -128,7 +157,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           </div>
         )}
 
-        {hasValidCoordinates() && !loading && (
+        {hasValidCoordinates() && !loading && !skipMap && !error && (
           <div className="absolute bottom-2 left-2 bg-white px-3 py-1 rounded-full text-sm font-medium flex items-center z-20">
             <Ruler size={16} className="mr-1" /> Estimated roof outline
           </div>
@@ -146,7 +175,8 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
         
         <p className="text-sm text-gray-600 mb-3">
-          Our AI analyzed your roof using satellite imagery. You can also enter the size manually.
+          {skipMap || error ? "Using estimated roof size." : "Our AI analyzed your roof using satellite imagery."}
+          You can also enter the size manually.
         </p>
 
         {/* Auto/Manual Toggle */}
