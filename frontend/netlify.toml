@@ -7,6 +7,8 @@
 [build.environment]
   # This tells create-react-app to ignore linting during build
   CI = "false"
+  # Set default API URL for fallback
+  REACT_APP_API_URL = "https://roof-measure-5164a9a88417.herokuapp.com"
 
 # Redirect API requests to your backend server
 [[redirects]]
