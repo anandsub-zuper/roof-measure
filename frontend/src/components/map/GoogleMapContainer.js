@@ -1,5 +1,6 @@
 // src/components/map/GoogleMapContainer.js
 import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
+import config from '../../config';
 
 const GoogleMapContainer = forwardRef(({ 
   lat, 
@@ -82,7 +83,7 @@ const GoogleMapContainer = forwardRef(({
             return;
           }
           
-          const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
+          const API_KEY = config.googleMapsApiKey;
           
           if (!API_KEY) {
             console.error("Google Maps API key is missing in environment variables");
