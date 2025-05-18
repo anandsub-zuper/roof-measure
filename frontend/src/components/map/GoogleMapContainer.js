@@ -1,11 +1,12 @@
 // src/components/map/GoogleMapContainer.js
 import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import config from '../../config';
+import config from '../../config'; // Make sure this import path is correct
 
 const GoogleMapContainer = forwardRef(({ 
   lat, 
   lng, 
   address, 
+  roofSize, // New prop for the backend-provided roof size
   enableDrawing = false,
   onMapReady, 
   onMapError, 
@@ -18,7 +19,7 @@ const GoogleMapContainer = forwardRef(({
   const [errorMessage, setErrorMessage] = useState(null);
   const [loadingTimeout, setLoadingTimeout] = useState(null);
   
-  console.log("GoogleMapContainer rendering with props:", { lat, lng, address });
+  console.log("GoogleMapContainer rendering with props:", { lat, lng, address, roofSize });
   
   // Exposed methods
   useImperativeHandle(ref, () => ({
@@ -36,6 +37,37 @@ const GoogleMapContainer = forwardRef(({
     },
     getMapInstance: () => mapInstance
   }));
+  
+  // Function to create accurate polygon based on roof size
+  const createAccuratePolygon = (lat, lng, size) => {
+    // Default size fallback
+    const roofSizeSqFt = size || 2500;
+    
+    // Calculate side length of an approximately square roof
+    const sideLength = Math.sqrt(roofSizeSqFt);
+    
+    // Convert feet to degrees
+    // At latitude 47°N, 1 degree of latitude is approximately 364,000 feet
+    // This varies slightly by latitude but is close enough for visual purposes
+    const feetPerDegreeLat = 364000;
+    
+    // Longitude degrees are wider at the equator and narrower at the poles
+    // cos(latitude in radians) gives the factor
+    const latRadians = lat * (Math.PI / 180);
+    const feetPerDegreeLng = feetPerDegreeLat * Math.cos(latRadians);
+    
+    // Calculate offsets (half the side length in each direction)
+    const latOffset = (sideLength / 2) / feetPerDegreeLat;
+    const lngOffset = (sideLength / 2) / feetPerDegreeLng;
+    
+    // Create polygon coordinates
+    return [
+      { lat: lat - latOffset, lng: lng - lngOffset }, // SW
+      { lat: lat - latOffset, lng: lng + lngOffset }, // SE
+      { lat: lat + latOffset, lng: lng + lngOffset }, // NE
+      { lat: lat + latOffset, lng: lng - lngOffset }  // NW
+    ];
+  };
   
   // Initialize map when component mounts
   useEffect(() => {
@@ -157,13 +189,8 @@ const GoogleMapContainer = forwardRef(({
           });
           setMarkerInstance(marker);
           
-          // Create a simple square polygon around the address
-          const polygonCoords = [
-            { lat: validLat - 0.0003, lng: validLng - 0.0003 },
-            { lat: validLat - 0.0003, lng: validLng + 0.0003 },
-            { lat: validLat + 0.0003, lng: validLng + 0.0003 },
-            { lat: validLat + 0.0003, lng: validLng - 0.0003 }
-          ];
+          // Create polygon using the accurate function with backend roof size
+          const polygonCoords = createAccuratePolygon(validLat, validLng, roofSize);
           
           const polygon = new window.google.maps.Polygon({
             paths: polygonCoords,
@@ -176,25 +203,31 @@ const GoogleMapContainer = forwardRef(({
           });
           setPolygonInstance(polygon);
           
-          // Calculate area (simple formula for demonstration)
+          // Calculate accurate area
           const calculateArea = () => {
             if (window.google && window.google.maps && window.google.maps.geometry) {
-              // Use Google's geometry library to calculate area
-              const path = polygon.getPath();
-              const googleLatLngs = [];
-              for (let i = 0; i < path.getLength(); i++) {
-                googleLatLngs.push(path.getAt(i));
+              try {
+                // Use Google's geometry library
+                const path = polygon.getPath();
+                const googleLatLngs = [];
+                for (let i = 0; i < path.getLength(); i++) {
+                  googleLatLngs.push(path.getAt(i));
+                }
+                
+                // Calculate area in square meters
+                const areaInSqMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
+                // Convert to square feet (1 sq meter = 10.7639 sq feet)
+                return Math.round(areaInSqMeters * 10.7639);
+              } catch (error) {
+                console.error("Error calculating polygon area:", error);
+                return roofSize || 2500; // Use backend size as fallback
               }
-              
-              // Calculate area in square meters
-              const areaInSqMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
-              // Convert to square feet (1 sq meter = 10.7639 sq feet)
-              return Math.round(areaInSqMeters * 10.7639);
             }
-            return 2500; // Default fallback
+            return roofSize || 2500; // Use backend size if geometry lib not available
           };
           
-          const area = calculateArea();
+          // Calculate area, but prioritize the backend roof size if available
+          const area = roofSize || calculateArea();
           console.log("Calculated area:", area, "sq ft");
           
           // Notify parent components
@@ -227,7 +260,7 @@ const GoogleMapContainer = forwardRef(({
       clearTimeout(timeoutId);
       return () => {};
     }
-  }, [lat, lng, address, onMapReady, onMapError, onPolygonCreated]);
+  }, [lat, lng, address, roofSize, onMapReady, onMapError, onPolygonCreated]);
 
   // Clean up timeout on unmount
   useEffect(() => {
