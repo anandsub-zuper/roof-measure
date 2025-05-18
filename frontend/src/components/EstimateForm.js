@@ -83,6 +83,8 @@ const EstimateForm = () => {
 const getAddressDetails = useCallback(async () => {
   if (!formData.address) return;
   
+  console.log("🔍 DEBUG: Starting address processing for:", formData.address);
+  
   // Set a timeout to prevent hanging
   const timeoutPromise = new Promise((_, reject) => {
     setTimeout(() => reject(new Error('Operation timed out')), 15000);
@@ -92,20 +94,27 @@ const getAddressDetails = useCallback(async () => {
   
   try {
     // First get property data from Rentcast API
+    console.log("🔍 DEBUG: Calling propertyDataService.getPropertyDetails");
     let propertyData = null;
     try {
       propertyData = await propertyDataService.getPropertyDetails(formData.address);
-      console.log("Retrieved property data:", propertyData);
+      console.log("🔍 DEBUG: Retrieved property data:", JSON.stringify(propertyData, null, 2));
+      
+      if (propertyData) {
+        console.log("🔍 DEBUG: Property Type:", propertyData.propertyType);
+        console.log("🔍 DEBUG: Building Size:", propertyData.buildingSize);
+        console.log("🔍 DEBUG: Stories:", propertyData.stories);
+      }
       
       // Store property data in form state
       updateFormData('propertyData', propertyData);
     } catch (propertyError) {
-      console.error("Error fetching property data:", propertyError);
+      console.error("🔍 DEBUG: Error fetching property data:", propertyError);
       // Continue without property data - not critical
     }
     
     // Get coordinates from address - pass property data if available
-    console.log("Getting coordinates for address:", formData.address);
+    console.log("🔍 DEBUG: Getting coordinates for address:", formData.address);
     
     // Wrap the geocoding API call with a race against the timeout
     const response = await Promise.race([
@@ -113,7 +122,7 @@ const getAddressDetails = useCallback(async () => {
       timeoutPromise
     ]);
     
-    console.log("Geocoding API response:", response);
+    console.log("🔍 DEBUG: Geocoding API response:", response);
     
     if (response) {
       // Extract the actual data, handling different response structures
@@ -123,7 +132,7 @@ const getAddressDetails = useCallback(async () => {
       const lat = parseFloat(data.lat);
       const lng = parseFloat(data.lng);
       
-      console.log("Extracted coordinates:", { lat, lng });
+      console.log("🔍 DEBUG: Extracted coordinates:", { lat, lng });
       
       if (!isNaN(lat) && !isNaN(lng)) {
         // Update form with coordinates and address components
@@ -135,13 +144,15 @@ const getAddressDetails = useCallback(async () => {
         
         // Get roof size if coordinates are available - pass property data if available
         try {
-          console.log("Getting roof size for coordinates:", { lat, lng });
+          console.log("🔍 DEBUG: Getting roof size for coordinates:", { lat, lng });
+          console.log("🔍 DEBUG: Passing property data to getRoofSizeEstimate:", propertyData ? "Yes" : "No");
+          
           const roofSizeData = await Promise.race([
             apiService.getRoofSizeEstimate(lat, lng, propertyData),
             timeoutPromise
           ]);
           
-          console.log("Roof size API response:", roofSizeData);
+          console.log("🔍 DEBUG: Roof size API response:", roofSizeData);
           
           if (roofSizeData) {
             // Extract size data, handling different response structures
@@ -149,6 +160,8 @@ const getAddressDetails = useCallback(async () => {
             
             // Check for building size from property data first (most accurate)
             if (propertyData && propertyData.buildingSize) {
+              console.log("🔍 DEBUG: Using building size from property data:", propertyData.buildingSize);
+              
               // Calculate roof size from building size data
               const calculatedRoofSize = 
                 propertyPolygonGenerator.calculateRoofSizeFromBuildingSize(
@@ -157,18 +170,18 @@ const getAddressDetails = useCallback(async () => {
                 );
               
               if (calculatedRoofSize) {
-                console.log("Using roof size calculated from property data:", calculatedRoofSize);
+                console.log("🔍 DEBUG: Calculated roof size from property data:", calculatedRoofSize);
                 updateFormData('roofSize', calculatedRoofSize);
                 updateFormData('initialRoofSize', calculatedRoofSize);
               } else {
                 // Fallback to API result
                 const roofSize = parseInt(sizeData.size || 0, 10);
                 if (!isNaN(roofSize) && roofSize > 0) {
-                  console.log("Setting roof size to:", roofSize);
+                  console.log("🔍 DEBUG: Setting roof size from API:", roofSize);
                   updateFormData('roofSize', roofSize);
                   updateFormData('initialRoofSize', roofSize);
                 } else {
-                  console.log("Invalid roof size, using default");
+                  console.log("🔍 DEBUG: Invalid roof size from API, using default");
                   updateFormData('roofSize', 3000);
                   updateFormData('initialRoofSize', 3000);
                 }
@@ -177,33 +190,34 @@ const getAddressDetails = useCallback(async () => {
               // Use API result if no property data
               const roofSize = parseInt(sizeData.size || 0, 10);
               if (!isNaN(roofSize) && roofSize > 0) {
-                console.log("Setting roof size to:", roofSize);
+                console.log("🔍 DEBUG: Setting roof size from API:", roofSize);
                 updateFormData('roofSize', roofSize);
                 updateFormData('initialRoofSize', roofSize);
               } else {
-                console.log("Invalid roof size, using default");
+                console.log("🔍 DEBUG: Invalid roof size from API, using default");
                 updateFormData('roofSize', 3000);
                 updateFormData('initialRoofSize', 3000);
               }
             }
             
-            // Important: Also capture the roof polygon if available
+            // Also capture the roof polygon if available
             if (sizeData.roofPolygon && Array.isArray(sizeData.roofPolygon)) {
-              console.log("Received roof polygon from API:", sizeData.roofPolygon);
+              console.log("🔍 DEBUG: Received roof polygon from API:", JSON.stringify(sizeData.roofPolygon));
               updateFormData('roofPolygon', sizeData.roofPolygon);
             }
           } else {
+            console.log("🔍 DEBUG: No roof size data, using default");
             updateFormData('roofSize', 3000);
             updateFormData('initialRoofSize', 3000);
           }
         } catch (sizeError) {
-          console.error("Error getting roof size:", sizeError);
+          console.error("🔍 DEBUG: Error getting roof size:", sizeError);
           updateFormData('roofSize', 3000);
           updateFormData('initialRoofSize', 3000);
         }
       } else {
-        console.error("Invalid coordinates in response:", { lat, lng });
-        // Use fallback coordinates for Sammamish, WA as default
+        console.error("🔍 DEBUG: Invalid coordinates in response:", { lat, lng });
+        // Use fallback coordinates
         updateFormData('lat', 47.6162);
         updateFormData('lng', -122.0355);
         updateFormData('roofSize', 3000);
@@ -211,8 +225,8 @@ const getAddressDetails = useCallback(async () => {
         alert("Could not determine the exact location coordinates. Using approximate location.");
       }
     } else {
-      console.error("Invalid geocoding response format");
-      // Use fallback coordinates for Sammamish, WA as default
+      console.error("🔍 DEBUG: Invalid geocoding response format");
+      // Use fallback coordinates
       updateFormData('lat', 47.6162);
       updateFormData('lng', -122.0355);
       updateFormData('roofSize', 3000);
@@ -220,11 +234,11 @@ const getAddressDetails = useCallback(async () => {
       alert("Error processing address. Using default location data.");
     }
   } catch (error) {
-    console.error("Error in address processing:", error);
+    console.error("🔍 DEBUG: Error in address processing:", error);
     
     // Handle timeout specifically
     if (error.message === 'Operation timed out') {
-      console.warn("Operation timed out - using fallback data");
+      console.warn("🔍 DEBUG: Operation timed out - using fallback data");
     }
     
     // Use fallback values
@@ -235,6 +249,7 @@ const getAddressDetails = useCallback(async () => {
     
     alert("There was an error processing your address. Using default location data.");
   } finally {
+    console.log("🔍 DEBUG: Address processing completed");
     setIsLoading(false);
   }
 }, [formData.address, updateFormData]);
