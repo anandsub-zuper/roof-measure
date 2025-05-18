@@ -1,11 +1,11 @@
-// backend/services/openAIService.js
+// services/openaiService.js
 const axios = require('axios');
+const { logInfo, logError } = require('../utils/logger');
 
 // OpenAI API configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_MODEL = 'gpt-4o';
-const OPENAI_VISION_MODEL = 'gpt-4o';
 
 /**
  * Make a request to OpenAI API with standardized error handling
@@ -14,6 +14,8 @@ const OPENAI_VISION_MODEL = 'gpt-4o';
  */
 const makeOpenAIRequest = async (requestData) => {
   try {
+    logInfo('Making OpenAI request', { model: requestData.model });
+    
     const response = await axios.post(
       OPENAI_API_URL,
       requestData,
@@ -21,12 +23,18 @@ const makeOpenAIRequest = async (requestData) => {
         headers: {
           'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000 // 30 second timeout
       }
     );
+    
     return response.data;
   } catch (error) {
-    console.error('OpenAI API error:', error.response?.data || error.message);
+    logError('OpenAI API error', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
     throw error;
   }
 };
@@ -44,167 +52,85 @@ const generateRoofEstimate = async (data) => {
       - Roof size: ${data.roofSize} square feet
       - Roof steepness: ${data.roofSteepness}
       - Desired material: ${data.desiredRoofMaterial}
-      - Current material: ${data.currentRoofMaterial}
-      - Building type: ${data.buildingType}
-      - Location: ${data.city}, ${data.state}
+      - Current material: ${data.currentRoofMaterial || 'Not specified'}
+      - Building type: ${data.buildingType || 'Not specified'}
+      - Location: ${data.city || ''}, ${data.state || ''}
+      - Timeline: ${data.timeline || 'Not specified'}
+      - Financing preferences: ${data.financing || 'Not specified'}
       
       Provide a complete estimate including:
       1. Total cost range (low, average, high)
-      2. Cost breakdown by category
+      2. Cost breakdown by category (materials, labor, removal, etc.)
       3. Price per square foot
       4. Factors affecting the price
-      5. Material information
+      5. Material information (lifespan, pros, cons)
       
-      Format the response as a JSON object that can be parsed.
+      Format the response as a JSON object with the following structure:
+      {
+        "lowEstimate": number,
+        "estimate": number,
+        "highEstimate": number,
+        "pricePerSqft": number,
+        "estimateParts": [
+          { "name": string, "cost": number }
+        ],
+        "estimateFactors": [
+          { "factor": string, "impact": string, "description": string }
+        ],
+        "materialInfo": {
+          "lifespan": string,
+          "pros": [string],
+          "cons": [string]
+        }
+      }
     `;
     
     // Call OpenAI API
     const requestData = {
       model: OPENAI_MODEL,
       messages: [
-        { role: "system", content: "You are an expert roofing contractor with detailed knowledge of costs and material requirements." },
+        { role: "system", content: "You are an expert roofing contractor with detailed knowledge of costs and material requirements. Provide accurate, realistic estimates based on current market rates and local factors." },
         { role: "user", content: prompt }
       ],
       temperature: 0.2,
-      max_tokens: 1500
+      max_tokens: 1500,
+      response_format: { type: "json_object" }
     };
     
     const responseData = await makeOpenAIRequest(requestData);
-    
-    // Extract the JSON response
     const content = responseData.choices[0].message.content;
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
     
-    if (jsonMatch) {
-      const estimateData = JSON.parse(jsonMatch[0]);
+    try {
+      // Parse the JSON response
+      const estimateData = JSON.parse(content);
       return estimateData;
+    } catch (parseError) {
+      logError('Error parsing OpenAI response', { error: parseError.message, content });
+      // Fallback to simulated estimate if parsing fails
+      return generateSimulatedEstimate(data);
     }
-    
-    // Fallback to simulated estimate if parsing fails
-    return generateSimulatedEstimate(data);
   } catch (error) {
-    console.error('Error generating estimate:', error);
+    logError('Error generating estimate with OpenAI', { error: error.message });
     // Fallback to simulated estimate on API error
     return generateSimulatedEstimate(data);
   }
 };
 
 /**
- * Analyze a roof image to identify roof boundaries
- * @param {string} imageBase64 - The base64-encoded image data
- * @returns {Promise<Array>} - Array of coordinates for the roof polygon
+ * Fallback function to generate estimates without OpenAI
+ * @param {Object} data - Form data
+ * @returns {Object} Simulated estimate
  */
-const analyzeRoofImage = async (imageBase64) => {
-  try {
-    if (!imageBase64) {
-      throw new Error('No image data provided');
-    }
-    
-    // Create the OpenAI Vision API request
-    const requestData = {
-      model: OPENAI_VISION_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Analyze this satellite image and identify the roof boundaries. Return ONLY a JSON array of coordinates representing the roof polygon. Format should be [{lat: number, lng: number}, ...]. Be precise and include only the main building roof."
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${imageBase64}`
-              }
-            }
-          ]
-        }
-      ],
-      max_tokens: 1000
-    };
-    
-    // Make the API request
-    const responseData = await makeOpenAIRequest(requestData);
-    
-    // Extract the JSON array from the response
-    const responseText = responseData.choices[0].message.content;
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-    
-    if (jsonMatch) {
-      try {
-        const coordinates = JSON.parse(jsonMatch[0]);
-        
-        // Validate the coordinates
-        if (Array.isArray(coordinates) && coordinates.length >= 3) {
-          const validCoordinates = coordinates.every(coord => 
-            typeof coord === 'object' && 
-            typeof coord.lat === 'number' && 
-            typeof coord.lng === 'number'
-          );
-          
-          if (validCoordinates) {
-            return coordinates;
-          }
-        }
-        throw new Error('Invalid coordinates format');
-      } catch (parseError) {
-        console.error("Failed to parse coordinates from OpenAI response:", parseError);
-        throw new Error('Failed to parse AI response');
-      }
-    }
-    
-    throw new Error('Unable to extract coordinates from AI response');
-  } catch (error) {
-    console.error('Error analyzing roof image:', error);
-    throw error;
-  }
-};
-
-/**
- * Answer a roofing-related question using OpenAI
- * @param {string} question - The question to ask
- * @returns {Promise<Object>} - The answer data
- */
-const askRoofingQuestion = async (question) => {
-  try {
-    const requestData = {
-      model: OPENAI_MODEL,
-      messages: [
-        { 
-          role: "system", 
-          content: "You are an expert roofing contractor with extensive knowledge about roofing materials, installation, maintenance, and costs. Provide helpful, accurate information to homeowners."
-        },
-        { 
-          role: "user", 
-          content: question 
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 1000
-    };
-    
-    const responseData = await makeOpenAIRequest(requestData);
-    return {
-      answer: responseData.choices[0].message.content,
-      metadata: {
-        model: OPENAI_MODEL,
-        timestamp: new Date().toISOString()
-      }
-    };
-  } catch (error) {
-    console.error('Error answering roofing question:', error);
-    throw error;
-  }
-};
-
-// Fallback function to generate estimates without API
 const generateSimulatedEstimate = (data) => {
+  logInfo('Generating simulated estimate', { roofSize: data.roofSize, material: data.desiredRoofMaterial });
+  
   // Price per square foot based on material
   const basePricePerSqft = {
     'asphalt': 4.5,
-    'metal': 8.5,
-    'tile': 9.5
-  }[data.desiredRoofMaterial] || 5.5;
+    'metal': 9.5,
+    'tile': 12.5,
+    'cedar': 8.5
+  }[data.desiredRoofMaterial] || 6.0;
   
   // Adjustment factors
   const steepnessFactor = {
@@ -214,15 +140,59 @@ const generateSimulatedEstimate = (data) => {
     'steep': 1.4
   }[data.roofSteepness] || 1.0;
   
+  // Regional adjustment based on state
+  const regionFactor = (() => {
+    if (!data.state) return 1.0;
+    
+    const state = data.state.toUpperCase();
+    // Higher cost regions
+    if (['CA', 'NY', 'MA', 'NJ', 'CT', 'WA', 'DC'].includes(state)) return 1.25;
+    // Medium cost regions
+    if (['CO', 'OR', 'IL', 'MD', 'VA', 'MN', 'RI'].includes(state)) return 1.1;
+    // Lower cost regions
+    if (['TX', 'FL', 'GA', 'NC', 'TN', 'AL', 'MS', 'KY', 'OK', 'AR'].includes(state)) return 0.9;
+    
+    return 1.0;
+  })();
+  
   // Calculate estimate
-  const totalSqft = parseFloat(data.roofSize);
-  const averagePrice = Math.round(totalSqft * basePricePerSqft * steepnessFactor);
+  const totalSqft = parseFloat(data.roofSize) || 3000;
+  const adjustedPricePerSqft = basePricePerSqft * steepnessFactor * regionFactor;
+  const averagePrice = Math.round(totalSqft * adjustedPricePerSqft);
+  
+  // Material info based on selection
+  const materialInfo = {
+    'asphalt': {
+      lifespan: '15-30 years',
+      pros: ['Affordable', 'Widely available', 'Easy to install', 'Good variety of colors'],
+      cons: ['Shorter lifespan than other materials', 'Less energy efficient', 'Can be damaged by extreme weather']
+    },
+    'metal': {
+      lifespan: '40-70 years',
+      pros: ['Long lifespan', 'Durable in extreme weather', 'Energy efficient', 'Recyclable'],
+      cons: ['Higher upfront cost', 'Can be noisy during rain', 'May dent from hail']
+    },
+    'tile': {
+      lifespan: '50+ years',
+      pros: ['Extremely durable', 'Great aesthetic appeal', 'Excellent insulation', 'Fire resistant'],
+      cons: ['Very heavy - may require structural reinforcement', 'Expensive', 'More complex installation']
+    },
+    'cedar': {
+      lifespan: '20-35 years',
+      pros: ['Natural beauty', 'Good insulation', 'Wind resistant', 'Environmentally friendly'],
+      cons: ['Regular maintenance required', 'Susceptible to mold and insects', 'Fire hazard without treatment']
+    }
+  }[data.desiredRoofMaterial] || {
+    lifespan: '20-40 years',
+    pros: ['Good durability', 'Moderate cost', 'Readily available'],
+    cons: ['May require regular maintenance', 'Performance varies by climate']
+  };
   
   return {
     lowEstimate: Math.round(averagePrice * 0.85),
     estimate: averagePrice,
     highEstimate: Math.round(averagePrice * 1.15),
-    pricePerSqft: Math.round(basePricePerSqft * steepnessFactor * 10) / 10,
+    pricePerSqft: Math.round(adjustedPricePerSqft * 10) / 10,
     estimateParts: [
       { name: "Removal & Disposal", cost: Math.round(averagePrice * 0.15) },
       { name: "Materials", cost: Math.round(averagePrice * 0.45) },
@@ -230,15 +200,15 @@ const generateSimulatedEstimate = (data) => {
       { name: "Permits & Overhead", cost: Math.round(averagePrice * 0.1) }
     ],
     estimateFactors: [
-      { factor: "Roof Size", impact: "High Impact", description: `Your ${data.roofSize} sq ft roof is the primary cost factor` },
+      { factor: "Roof Size", impact: "High Impact", description: `Your ${totalSqft} sq ft roof is the primary cost factor` },
       { factor: "Roof Steepness", impact: steepnessFactor > 1.1 ? "High Impact" : "Medium Impact", description: `${data.roofSteepness} roof requires ${data.roofSteepness === 'steep' ? 'specialized equipment' : 'standard installation'}` },
-      { factor: "Material", impact: "High Impact", description: `${data.desiredRoofMaterial} roofing affects cost and longevity` }
-    ]
+      { factor: "Material", impact: "High Impact", description: `${data.desiredRoofMaterial} roofing affects cost and longevity` },
+      { factor: "Location", impact: regionFactor !== 1.0 ? "Medium Impact" : "Low Impact", description: data.state ? `Regional costs in ${data.state} ${regionFactor > 1.0 ? 'increase' : 'decrease'} overall price` : 'National average pricing used' }
+    ],
+    materialInfo
   };
 };
 
 module.exports = {
-  generateRoofEstimate,
-  analyzeRoofImage,
-  askRoofingQuestion
+  generateRoofEstimate
 };
