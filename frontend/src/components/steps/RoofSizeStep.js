@@ -25,9 +25,9 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const prevSizeRef = useRef(formData.roofSize);
   
   // NEW: Leaflet integration states (only used when ENABLE_LEAFLET is true)
-  const [leafletArea, setLeafletArea] = useState(null);
-  const [leafletPolygon, setLeafletPolygon] = useState(null);
-  const [showLeaflet, setShowLeaflet] = useState(false);
+  const [leafletArea, setLeafletArea] = useState(0);
+  const [leafletPolygon, setLeafletPolygon] = useState(true);
+  const [showLeaflet, setShowLeaflet] = useState(true);
   
   // Calculate estimated roof size based on property data (as a reference point)
   const estimatedSizeFromProperty = useMemo(() => {
