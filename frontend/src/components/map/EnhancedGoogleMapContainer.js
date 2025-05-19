@@ -32,7 +32,7 @@ const EnhancedGoogleMapContainer = forwardRef(({
   });
   
   // Exposed methods
-  useImperativeHandle(ref, () => ({
+  useImperativeHandle(ref, () => ({ 
     zoomIn: () => {
       if (mapInstance) {
         const currentZoom = mapInstance.getZoom() || 19;
@@ -46,6 +46,7 @@ const EnhancedGoogleMapContainer = forwardRef(({
       }
     },
     getMapInstance: () => mapInstance,
+    getPolygonInstance: () => polygonInstance,
     fitPolygon: () => {
       if (mapInstance && polygonInstance) {
         const bounds = new window.google.maps.LatLngBounds();
