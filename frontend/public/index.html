@@ -38,7 +38,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Leaflet assets - consolidated to avoid duplication conflicts -->
+    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
           crossorigin=""/>
@@ -55,7 +55,11 @@
     
     <div id="root"></div>
     
-    <!-- Leaflet JS libraries - load before app for faster initialization -->
+    <!-- Load Turf.js before other libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"
+            crossorigin=""></script>
+            
+    <!-- Leaflet JS libraries -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin=""></script>
@@ -63,7 +67,49 @@
             crossorigin=""></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet-measure@3.1.0/dist/leaflet-measure.min.js"
             crossorigin=""></script>
-    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"
-            crossorigin=""></script>
+            
+    <!-- Custom script to ensure library compatibility -->
+    <script>
+      // Create a global namespace for measurement utilities
+      window.RoofAI = window.RoofAI || {};
+      
+      // Initialize when document is loaded
+      document.addEventListener('DOMContentLoaded', function() {
+        // Set up utility functions
+        window.RoofAI.utils = {
+          // Calculate area using Turf.js
+          calculateArea: function(coordinates) {
+            if (!window.turf || !coordinates || !Array.isArray(coordinates) || coordinates.length < 3) {
+              return 0;
+            }
+            
+            try {
+              // Convert coordinates to GeoJSON format [lng, lat]
+              const turfCoordinates = coordinates.map(point => [point.lng, point.lat]);
+              
+              // Close the polygon if needed
+              if (turfCoordinates.length > 0 && 
+                  (turfCoordinates[0][0] !== turfCoordinates[turfCoordinates.length-1][0] || 
+                  turfCoordinates[0][1] !== turfCoordinates[turfCoordinates.length-1][1])) {
+                turfCoordinates.push(turfCoordinates[0]);
+              }
+              
+              // Create a Turf polygon and calculate area
+              const turfPolygon = window.turf.polygon([turfCoordinates]);
+              const areaInSquareMeters = window.turf.area(turfPolygon);
+              
+              // Convert to square feet
+              return Math.round(areaInSquareMeters * 10.7639);
+            } catch (error) {
+              console.error("Error calculating area:", error);
+              return 0;
+            }
+          }
+        };
+        
+        // Log that initialization is complete
+        console.log("RoofAI measurement utilities initialized");
+      });
+    </script>
   </body>
 </html>
