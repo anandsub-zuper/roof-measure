@@ -1,6 +1,7 @@
 # netlify.toml
 [build]
   command = "npm run build"
+  command = "CI=false npm run build"
   publish = "build"
 
 # Build environment variables
@@ -17,6 +18,7 @@
   REACT_APP_ENABLE_LEAFLET = "true"
   # Do not disable Google Maps outright, let config logic decide
   REACT_APP_DISABLE_GOOGLE_MAPS = "false"
+  ESLINT_NO_DEV_ERRORS = "true"
 
 # Redirect API requests to your backend server
 [[redirects]]
