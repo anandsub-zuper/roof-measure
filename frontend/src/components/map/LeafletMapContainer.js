@@ -1,11 +1,10 @@
 // src/components/map/LeafletMapContainer.js
 import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw/dist/leaflet.draw.css';
-import 'leaflet-measure/dist/leaflet-measure.css';
-import '@turf/turf';
+import * as turf from '@turf/turf';
 import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
+import { initLeafletDraw, initLeafletMeasure } from '../../utils/leafletPlugins';
+
 
 // Fix Leaflet icon issue
 import icon from 'leaflet/dist/images/marker-icon.png';
