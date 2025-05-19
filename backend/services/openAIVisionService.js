@@ -2,15 +2,33 @@
 const { OpenAI } = require('openai');
 const axios = require('axios');
 const { logInfo, logError } = require('../utils/logger');
+const fs = require('fs');
+const path = require('path');
 
-// Initialize OpenAI
+// Initialize OpenAI with API key from environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Simple in-memory cache to improve performance
+// In-memory cache for performance optimization
 const analysisCache = {};
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+// File-based cache for persistence across restarts
+const CACHE_DIR = path.join(__dirname, '..', 'cache');
+const DISK_CACHE_ENABLED = true;
+
+// Ensure cache directory exists
+if (DISK_CACHE_ENABLED) {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      logInfo('Created cache directory', { path: CACHE_DIR });
+    }
+  } catch (error) {
+    logError('Failed to create cache directory', { error: error.message });
+  }
+}
 
 /**
  * Main function to analyze roof using OpenAI Vision
@@ -30,36 +48,64 @@ exports.analyzeRoof = async (lat, lng, propertyData = null) => {
       yearBuilt: propertyData?.yearBuilt
     });
 
-    // Check cache first
-    const cacheKey = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+    // Generate cache key based on coordinates and property data hash
+    const propDataHash = propertyData ? 
+      hashPropertyData(propertyData) : 'no-property-data';
+    const cacheKey = `${lat.toFixed(6)},${lng.toFixed(6)}-${propDataHash}`;
+    
+    // Check memory cache first
     if (analysisCache[cacheKey] && 
-        analysisCache[cacheKey].timestamp > Date.now() - CACHE_TTL &&
-        analysisCache[cacheKey].propertySize === propertyData?.buildingSize) {
-      logInfo('Using cached roof analysis', { lat, lng, cacheAge: 'less than 24 hours' });
+        analysisCache[cacheKey].timestamp > Date.now() - CACHE_TTL) {
+      logInfo('Using memory-cached roof analysis', { lat, lng, cacheAge: 'less than 24 hours' });
       return analysisCache[cacheKey].result;
     }
+    
+    // Check disk cache if enabled
+    if (DISK_CACHE_ENABLED) {
+      const diskCacheResult = await checkDiskCache(cacheKey);
+      if (diskCacheResult) {
+        // Store in memory cache too
+        analysisCache[cacheKey] = {
+          result: diskCacheResult,
+          timestamp: Date.now()
+        };
+        logInfo('Using disk-cached roof analysis', { lat, lng });
+        return diskCacheResult;
+      }
+    }
 
-    // Get the best satellite image and analysis
+    // No cache hit, perform the analysis
+    logInfo('Starting roof analysis with OpenAI Vision', { lat, lng });
+    
+    // Process multiple zoom levels
     const result = await processMultipleZoomLevels(lat, lng, propertyData);
     
-    // Cache the result
-    analysisCache[cacheKey] = {
-      result,
-      timestamp: Date.now(),
-      propertySize: propertyData?.buildingSize
-    };
+    // Apply industry standard adjustments
+    const adjustedResult = adjustToIndustryStandards(result, propertyData);
     
     // Cross-validate with property data and adjust if necessary
-    if (propertyData && propertyData.buildingSize) {
-      const crossValidatedResult = crossValidateWithPropertyData(result, propertyData);
-      
-      // Update cache with cross-validated result
-      analysisCache[cacheKey].result = crossValidatedResult;
-      
-      return crossValidatedResult;
+    let finalResult = crossValidateWithPropertyData(adjustedResult, propertyData);
+    
+    // Store in memory cache
+    analysisCache[cacheKey] = {
+      result: finalResult,
+      timestamp: Date.now()
+    };
+    
+    // Store in disk cache if enabled
+    if (DISK_CACHE_ENABLED) {
+      saveToDiskCache(cacheKey, finalResult).catch(err => {
+        logError('Failed to save to disk cache', { error: err.message });
+      });
     }
     
-    return result;
+    logInfo('OpenAI Vision analysis completed', { 
+      confidence: finalResult.confidence,
+      roofArea: finalResult.roofArea,
+      cacheSaved: true
+    });
+    
+    return finalResult;
   } catch (error) {
     logError('Error in OpenAI Vision roof analysis', { 
       error: error.message,
@@ -85,7 +131,7 @@ exports.analyzeRoof = async (lat, lng, propertyData = null) => {
  */
 async function processMultipleZoomLevels(lat, lng, propertyData) {
   // Define zoom levels to try - order by most likely to succeed
-  const zoomLevels = [20, 21, 19];
+  const zoomLevels = [21, 20, 19];
   
   try {
     // Process all zoom levels in parallel for speed
@@ -125,49 +171,6 @@ async function processMultipleZoomLevels(lat, lng, propertyData) {
       const best = successfulResults[0];
       logInfo(`Using best result from zoom level ${best.zoom} with confidence ${best.analysis.confidence} = ${best.confidence}`);
       
-      // If we have a high confidence result, use it directly
-      if (best.analysis.confidence === 'high') {
-        return {
-          success: true,
-          ...best.analysis,
-          method: "openai_vision"
-        };
-      }
-      
-      // For medium confidence, do some validation with property data if available
-      if (best.analysis.confidence === 'medium' && propertyData?.buildingSize) {
-        const expectedFootprint = propertyData.buildingSize / (propertyData.stories || 1);
-        const visionFootprint = best.analysis.roofArea / 1.2; // Approximate reversal of pitch factor
-        const ratio = visionFootprint / expectedFootprint;
-        
-        logInfo('Validating vision result against property data', {
-          visionArea: best.analysis.roofArea,
-          expectedFootprint,
-          ratio
-        });
-        
-        // If within reasonable range, confidence stays medium
-        if (ratio >= 0.7 && ratio <= 1.5) {
-          return {
-            success: true,
-            ...best.analysis,
-            method: "openai_vision"
-          };
-        } else {
-          // Reduce confidence if large discrepancy
-          logInfo('Reducing confidence due to property data discrepancy');
-          return {
-            success: true,
-            ...best.analysis,
-            confidence: "low", 
-            notes: (best.analysis.notes || "") + 
-                   ` AI estimate (${best.analysis.roofArea} sq ft) differs significantly from property-based estimate.`,
-            method: "openai_vision"
-          };
-        }
-      }
-      
-      // Otherwise just return the best result we have
       return {
         success: true,
         ...best.analysis,
@@ -239,7 +242,7 @@ async function processZoomLevel(lat, lng, zoom, propertyData) {
 }
 
 /**
- * Analyze satellite imagery using OpenAI Vision
+ * Analyze satellite imagery using OpenAI Vision with enhanced industry standards
  * @param {string} imageBase64 - Base64 encoded image
  * @param {number} lat - Latitude
  * @param {number} lng - Longitude
@@ -271,33 +274,35 @@ async function analyzeImageWithOpenAI(imageBase64, lat, lng, propertyData) {
     // Log the prompt property info for debugging
     logInfo('OpenAI prompt property info', { propertyInfo });
     
-    // Create the OpenAI request with detailed system prompt
+    // Create the OpenAI request with enhanced system prompt for industry standards
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert in roof analysis from satellite imagery. Your task is to:
-1. Precisely identify the roof boundaries of the main building
-2. Measure the roof area in square feet
-3. Determine the roof shape (simple, complex, etc.)
-4. Assess the roof pitch if possible
+          content: `You are an expert roof measurement specialist using satellite imagery to assess residential and commercial roofs. Your goal is to provide comprehensive and accurate measurements that match industry standards used by roofing contractors.
 
-Look for these visual cues:
-- Sharp color/shadow transitions defining roof edges
-- Regular geometric shapes indicating residential structures
-- Roof material textures (shingles, metal, etc.)
-- Shadows indicating height and pitch
-- Context from surrounding structures and property layouts
+CRITICAL ROOF MEASUREMENT PRINCIPLES:
+1. MEASURE COMPLETE ROOF AREA - Include ALL roof planes visible and implied, not just the main section
+2. ACCOUNT FOR PITCH COMPLETELY - Steep pitches can add 40-70% to horizontal footprint area
+3. INCLUDE ALL ROOF FEATURES - Measure dormers, overhangs, porches, and extensions
+4. CONSIDER MULTI-LEVEL ROOFS - Different levels should be measured separately and summed
+5. INCLUDE HIDDEN SECTIONS - Use visual cues to estimate sections partially obscured by trees
+6. APPLY INDUSTRY STANDARDS - Roofers typically measure conservatively to avoid material shortages
 
-IMPORTANT NOTES ON MEASUREMENT:
-- For a multi-story building, you are measuring the roof area, not the total building square footage
-- The roof area is typically similar to the building's footprint (ground floor area)
-- For pitched roofs, the roof area will be larger than the footprint due to the slope
-- A typical single family home has a footprint between 1,000-3,000 sq ft
-- For multi-story buildings, divide the total square footage by the number of stories to estimate footprint
+TYPICAL MEASUREMENT RANGES:
+- Small homes (1000-1500 sq ft footprint): Typically 1500-2400 sq ft roof area
+- Medium homes (1500-2500 sq ft footprint): Typically 2200-3800 sq ft roof area
+- Large homes (2500-4000 sq ft footprint): Typically 3500-6000 sq ft roof area
 
-Be sure your measurements and confidence level are realistic based on image quality and visibility.`
+When analyzing roofs of 2-story single-family homes:
+- For low pitch: Add 10-15% to footprint
+- For moderate pitch: Add 20-30% to footprint
+- For steep pitch: Add 40-70% to footprint
+- Overhangs typically add 5-15% to measurement
+- Complex shapes add another 5-15% for valleys and intricate sections
+
+If you're uncertain about a measurement, err on the conservative side used by contractors who typically measure roofs 10-15% larger to account for waste, overlaps, and complex cuts.`
         },
         {
           role: "user",
@@ -308,18 +313,23 @@ Be sure your measurements and confidence level are realistic based on image qual
 
 ${propertyInfo}
 
-Based on both the satellite image and the property information provided, please carefully analyze the roof and provide your assessment.
+I need a COMPREHENSIVE roof measurement that follows industry standards for roofing contractors. Please:
 
-If the property information suggests a building footprint of a certain size, use that as a reference to calibrate your measurements.
+1. Examine all visible roof planes and sections
+2. Measure the TOTAL ROOF SURFACE AREA including all pitches, not just the building footprint
+3. Include overhangs, dormers, and any extensions in your calculation
+4. Consider the roof pitch carefully - most single-family homes have at least moderate pitch
+5. If trees or shadows obscure parts of the roof, make a reasonable estimate for those areas
 
-Please provide your analysis in JSON format with these fields:
+Provide your analysis in JSON format with these fields:
 {
-  "roofArea": number (in square feet),
+  "roofArea": number (in square feet, TOTAL SURFACE AREA including all pitch factors),
   "confidence": "high" | "medium" | "low",
   "roofShape": "simple" | "complex" | "unknown",
   "roofPolygon": array of {lat, lng} points outlining the roof,
   "estimatedPitch": "flat" | "low" | "moderate" | "steep" | "unknown",
-  "notes": string with your reasoning
+  "notes": string with your reasoning,
+  "includedFeaturesInArea": ["main roof", "garage", "dormers", "overhangs", etc]
 }`
             },
             {
@@ -337,7 +347,20 @@ Please provide your analysis in JSON format with these fields:
     });
     
     try {
-      return JSON.parse(response.choices[0].message.content);
+      // Parse the JSON response and clean up the result
+      const analysisResult = JSON.parse(response.choices[0].message.content);
+      
+      // Ensure roofPolygon exists
+      if (!analysisResult.roofPolygon || !Array.isArray(analysisResult.roofPolygon)) {
+        analysisResult.roofPolygon = [];
+      }
+      
+      // Normalize includedFeaturesInArea as an array
+      if (!analysisResult.includedFeaturesInArea) {
+        analysisResult.includedFeaturesInArea = [];
+      }
+      
+      return analysisResult;
     } catch (parseError) {
       logError('Error parsing OpenAI response', { 
         error: parseError.message, 
@@ -348,6 +371,70 @@ Please provide your analysis in JSON format with these fields:
   } catch (error) {
     logError("Error analyzing image with OpenAI", { error: error.message });
     throw error;
+  }
+}
+
+/**
+ * Apply industry standard adjustments to ensure measurements match contractor norms
+ * @param {Object} visionResult - Result from vision analysis
+ * @param {Object} propertyData - Property data
+ */
+function adjustToIndustryStandards(visionResult, propertyData) {
+  if (!propertyData || !propertyData.buildingSize) {
+    return visionResult; // No adjustment possible without property data
+  }
+  
+  try {
+    // Extract key data
+    const stories = propertyData.stories || 1;
+    const footprint = Math.round(propertyData.buildingSize / stories);
+    const roofArea = visionResult.roofArea;
+    const propertyType = (propertyData.propertyType || '').toLowerCase();
+    const isSingleFamily = propertyType.includes('single') && propertyType.includes('family');
+    
+    // Determine industry standard minimums based on property type
+    let minIndustryFactor = 1.2; // Default 20% above footprint
+    
+    if (isSingleFamily) {
+      // Single family homes typically have larger industry factors
+      if (visionResult.estimatedPitch === 'steep') {
+        minIndustryFactor = 1.4; // 40% for steep pitch
+      } else if (visionResult.estimatedPitch === 'moderate') {
+        minIndustryFactor = 1.25; // 25% for moderate pitch
+      } else if (visionResult.estimatedPitch === 'low') {
+        minIndustryFactor = 1.15; // 15% for low pitch
+      }
+      
+      // Add complexity factor
+      if (visionResult.roofShape === 'complex') {
+        minIndustryFactor += 0.1; // Additional 10% for complex shapes
+      }
+    }
+    
+    // Calculate minimum industry standard measurement
+    const minIndustryStandard = Math.round(footprint * minIndustryFactor);
+    
+    // If vision result is below industry standard, adjust upward
+    if (roofArea < minIndustryStandard) {
+      logInfo('Adjusting measurement to meet industry standards', {
+        originalArea: roofArea,
+        adjustedArea: minIndustryStandard,
+        factor: minIndustryFactor,
+        reason: 'Below industry minimum'
+      });
+      
+      return {
+        ...visionResult,
+        roofArea: minIndustryStandard,
+        notes: (visionResult.notes || '') + 
+               ' Adjusted to meet industry standards for roofing contractors.'
+      };
+    }
+    
+    return visionResult; // Already meets industry standards
+  } catch (error) {
+    logError('Error applying industry standards', { error: error.message });
+    return visionResult; // Return original on error
   }
 }
 
@@ -365,21 +452,21 @@ function crossValidateWithPropertyData(visionResult, propertyData) {
     const stories = propertyData.stories || 1;
     const expectedFootprint = Math.round(propertyData.buildingSize / stories);
     
-    // Approximate roof size range based on property type and footprint
-    let minExpected = expectedFootprint * 0.8;
-    let maxExpected = expectedFootprint * 1.6;
+    // Determine appropriate factors based on property type
+    const propertyType = (propertyData.propertyType || '').toLowerCase();
+    const isSingleFamily = propertyType.includes('single') && propertyType.includes('family');
     
-    if (propertyData.propertyType) {
-      const type = propertyData.propertyType.toLowerCase();
-      if (type.includes('single') && type.includes('family')) {
-        // Single family homes often have more complex, pitched roofs
-        minExpected = expectedFootprint;
-        maxExpected = expectedFootprint * 1.8;
-      } else if (type.includes('condo') || type.includes('apartment')) {
-        // Condos/apartments often have simpler roof designs
-        minExpected = expectedFootprint * 0.9;
-        maxExpected = expectedFootprint * 1.3;
-      }
+    // Approximate roof size range based on property type and footprint
+    let minExpected, maxExpected;
+    
+    if (isSingleFamily) {
+      // Single family homes have wider acceptable ranges
+      minExpected = expectedFootprint;
+      maxExpected = Math.round(expectedFootprint * 1.8);
+    } else {
+      // Other property types have narrower ranges
+      minExpected = Math.round(expectedFootprint * 0.9);
+      maxExpected = Math.round(expectedFootprint * 1.5);
     }
     
     logInfo('Cross-validating vision result with property data', {
@@ -394,22 +481,34 @@ function crossValidateWithPropertyData(visionResult, propertyData) {
       // Vision failed to detect roof
       logInfo('Vision analysis failed to detect roof, using property-based calculation');
       return calculateRoofSizeFromProperty(propertyData, null, null);
-    } else if (visionResult.roofArea < minExpected || visionResult.roofArea > maxExpected) {
-      // Vision result is outside expected range
-      logInfo('Vision result outside expected range, adjusting confidence');
+    } else if (visionResult.roofArea < minExpected) {
+      // Vision result is below expected minimum
+      logInfo('Vision result below expected minimum, adjusting upward');
       
-      // If confidence was already low, just use property calculation
+      // If confidence was already low, use property calculation
       if (visionResult.confidence === 'low') {
-        logInfo('Low confidence vision result with large discrepancy, using property-based calculation');
         return calculateRoofSizeFromProperty(propertyData, null, null);
       }
       
-      // Otherwise reduce confidence
+      // Otherwise adjust the vision result upward
       const adjustedResult = {
         ...visionResult,
-        confidence: visionResult.confidence === 'high' ? 'medium' : 'low',
+        roofArea: minExpected,
         notes: (visionResult.notes || "") + 
-               ` AI estimate (${visionResult.roofArea} sq ft) differs significantly from property-based estimate (${Math.round(expectedFootprint * 1.2)} sq ft).`
+               ` Adjusted upward (from ${visionResult.roofArea} sq ft) to meet expected minimum for this property type.`
+      };
+      
+      return adjustedResult;
+    } else if (visionResult.roofArea > maxExpected && visionResult.confidence !== 'high') {
+      // Vision result is above expected maximum and not high confidence
+      logInfo('Vision result above expected maximum and not high confidence, adjusting downward');
+      
+      const adjustedResult = {
+        ...visionResult,
+        roofArea: maxExpected,
+        confidence: 'medium',
+        notes: (visionResult.notes || "") + 
+               ` Adjusted downward (from ${visionResult.roofArea} sq ft) to meet expected maximum for this property type.`
       };
       
       return adjustedResult;
@@ -424,7 +523,7 @@ function crossValidateWithPropertyData(visionResult, propertyData) {
 }
 
 /**
- * Calculate roof size from property data (fallback)
+ * Calculate roof size from property data (fallback and cross-reference)
  * @param {Object} propertyData - Property metadata
  * @param {number} lat - Latitude coordinate (optional)
  * @param {number} lng - Longitude coordinate (optional)
@@ -456,16 +555,19 @@ function calculateRoofSizeFromProperty(propertyData, lat, lng) {
   // Calculate roof area based on property type and stories
   let roofAreaFactor = 1.2; // Default factor for moderate pitch
   let pitchDescription = "moderate";
+  let roofShapeDescription = "simple";
   
   if (propertyData.propertyType) {
     const type = propertyData.propertyType.toLowerCase();
     
     if (type.includes('single') && type.includes('family')) {
       // Single family homes often have more complex, pitched roofs
-      roofAreaFactor = 1.4;
+      // Use higher factors to match industry standards
+      roofAreaFactor = 1.5; // Increased for industry standard match
       pitchDescription = "moderate";
+      roofShapeDescription = footprint > 2000 ? "complex" : "simple";
     } else if (type.includes('townhouse') || type.includes('town house')) {
-      roofAreaFactor = 1.25;
+      roofAreaFactor = 1.3;
       pitchDescription = "moderate";
     } else if (type.includes('condo') || type.includes('apartment')) {
       // Condos/apartments often have simpler roof designs
@@ -498,11 +600,12 @@ function calculateRoofSizeFromProperty(propertyData, lat, lng) {
     success: true,
     roofArea,
     confidence: "medium",
-    roofShape: "simple",
+    roofShape: roofShapeDescription,
     roofPolygon,
     estimatedPitch: pitchDescription,
     method: "property_data_calculation",
-    notes: `Calculated from ${buildingSize} sq ft ${stories}-story ${propertyData.propertyType || 'building'}.`
+    notes: `Calculated from ${buildingSize} sq ft ${stories}-story ${propertyData.propertyType || 'building'} using industry standard measurements.`,
+    includedFeaturesInArea: ["main roof", "overhangs"]
   };
 }
 
@@ -554,5 +657,73 @@ function confidenceToNumber(confidence) {
     case 'medium': return 2;
     case 'low': return 1;
     default: return 0;
+  }
+}
+
+/**
+ * Create a basic hash of property data for cache key
+ * @param {Object} propertyData - Property data
+ * @returns {string} - Hash string
+ */
+function hashPropertyData(propertyData) {
+  if (!propertyData) return 'null';
+  
+  const relevant = {
+    type: propertyData.propertyType || '',
+    size: propertyData.buildingSize || 0,
+    stories: propertyData.stories || 1
+  };
+  
+  return `${relevant.type}-${relevant.size}-${relevant.stories}`;
+}
+
+/**
+ * Check disk cache for an entry
+ * @param {string} cacheKey - Cache key
+ * @returns {Object|null} - Cached result or null
+ */
+async function checkDiskCache(cacheKey) {
+  if (!DISK_CACHE_ENABLED) return null;
+  
+  try {
+    const cacheFile = path.join(CACHE_DIR, `${encodeURIComponent(cacheKey)}.json`);
+    
+    if (!fs.existsSync(cacheFile)) {
+      return null;
+    }
+    
+    const cacheData = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    
+    // Check if cache has expired
+    if (cacheData.timestamp && (Date.now() - cacheData.timestamp) > CACHE_TTL) {
+      return null;
+    }
+    
+    return cacheData.result;
+  } catch (error) {
+    logError('Error checking disk cache', { error: error.message });
+    return null;
+  }
+}
+
+/**
+ * Save result to disk cache
+ * @param {string} cacheKey - Cache key
+ * @param {Object} result - Result to cache
+ */
+async function saveToDiskCache(cacheKey, result) {
+  if (!DISK_CACHE_ENABLED) return;
+  
+  try {
+    const cacheFile = path.join(CACHE_DIR, `${encodeURIComponent(cacheKey)}.json`);
+    
+    const cacheData = {
+      timestamp: Date.now(),
+      result
+    };
+    
+    fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2));
+  } catch (error) {
+    logError('Error saving to disk cache', { error: error.message });
   }
 }
