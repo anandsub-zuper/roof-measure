@@ -383,10 +383,10 @@ const HybridMapContainer = forwardRef(({
     }
   };
   
-  // Load Google Maps API first
+  // Let's also fix how we handle the initial load
   useEffect(() => {
     let timeoutId;
-    const progressInterval = setInterval(() => {
+    let progressInterval = setInterval(() => {
       setLoadingProgress(prev => Math.min(prev + 5, 40));
     }, 1000);
     
@@ -402,53 +402,78 @@ const HybridMapContainer = forwardRef(({
           if (onMapError) onMapError("Loading timed out");
         }, 30000);
         
-        // Check if already loaded
-        if (window.google && window.google.maps) {
-          console.log("Google Maps already loaded");
-          clearTimeout(timeoutId);
-          setGoogleMapsLoaded(true);
-          setLoadingProgress(50);
+        // Ensure the container is ready
+        if (!mapContainerRef.current) {
+          console.log("Waiting for map container to be available...");
           
-          // Go ahead and initialize the map
-          initializeGoogleMap();
-          return;
+          // Check every 100ms until it's available or timeout is reached
+          let checkAttempts = 0;
+          const checkContainer = setInterval(() => {
+            checkAttempts++;
+            if (mapContainerRef.current) {
+              console.log("Map container is now available after " + checkAttempts + " attempts");
+              clearInterval(checkContainer);
+              continueLoading();
+            } else if (checkAttempts > 50) { // 5 seconds max
+              clearInterval(checkContainer);
+              throw new Error("Map container never became available");
+            }
+          }, 100);
+          
+          return; // Exit and let the interval handle it
+        } else {
+          continueLoading();
         }
         
-        // Get API key
-        const apiKey = config.googleMapsApiKey;
-        
-        if (!apiKey) {
-          throw new Error("Google Maps API key is missing from configuration");
-        }
-        
-        // Load Google Maps API
-        window.initGoogleMapsCallback = () => {
-          console.log("Google Maps loaded successfully");
-          clearTimeout(timeoutId);
-          setGoogleMapsLoaded(true);
-          setLoadingProgress(50);
+        function continueLoading() {
+          // Check if already loaded
+          if (window.google && window.google.maps) {
+            console.log("Google Maps already loaded");
+            clearTimeout(timeoutId);
+            setGoogleMapsLoaded(true);
+            setLoadingProgress(50);
+            
+            // Go ahead and initialize the map
+            initializeGoogleMap();
+            return;
+          }
           
-          // Initialize the map
-          initializeGoogleMap();
-          delete window.initGoogleMapsCallback;
-        };
-        
-        // Create script tag
-        const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,drawing&callback=initGoogleMapsCallback`;
-        script.async = true;
-        script.defer = true;
-        
-        script.onerror = (error) => {
-          console.error("Error loading Google Maps script:", error);
-          clearTimeout(timeoutId);
-          setError("Failed to load Google Maps. Please check your internet connection.");
-          setLoading(false);
-          clearInterval(progressInterval);
-          if (onMapError) onMapError("Google Maps script failed to load");
-        };
-        
-        document.head.appendChild(script);
+          // Get API key
+          const apiKey = config.googleMapsApiKey;
+          
+          if (!apiKey) {
+            throw new Error("Google Maps API key is missing from configuration");
+          }
+          
+          // Load Google Maps API
+          window.initGoogleMapsCallback = () => {
+            console.log("Google Maps loaded successfully");
+            clearTimeout(timeoutId);
+            setGoogleMapsLoaded(true);
+            setLoadingProgress(50);
+            
+            // Initialize the map
+            initializeGoogleMap();
+            delete window.initGoogleMapsCallback;
+          };
+          
+          // Create script tag
+          const script = document.createElement('script');
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,drawing&callback=initGoogleMapsCallback`;
+          script.async = true;
+          script.defer = true;
+          
+          script.onerror = (error) => {
+            console.error("Error loading Google Maps script:", error);
+            clearTimeout(timeoutId);
+            setError("Failed to load Google Maps. Please check your internet connection.");
+            setLoading(false);
+            clearInterval(progressInterval);
+            if (onMapError) onMapError("Google Maps script failed to load");
+          };
+          
+          document.head.appendChild(script);
+        }
       } catch (error) {
         console.error("Error loading Google Maps:", error);
         clearTimeout(timeoutId);
@@ -464,42 +489,54 @@ const HybridMapContainer = forwardRef(({
         setLoadingStatus('creating map');
         setLoadingProgress(prev => Math.min(prev + 10, 70));
         
-        // Create the Google Map
-        if (!mapContainerRef.current) {
-          throw new Error("Map container reference is not available");
-        }
-        
-        // Initialize the map with satellite view
-        const map = new window.google.maps.Map(mapContainerRef.current, {
-          center: { lat: validLat, lng: validLng },
-          zoom: 19,
-          mapTypeId: 'satellite',
-          tilt: 0,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
-          zoomControl: true
-        });
-        
-        // Store the reference
-        googleMapRef.current = map;
-        
-        // Add a marker at the property location
-        new window.google.maps.Marker({
-          position: { lat: validLat, lng: validLng },
-          map: map,
-          title: address || "Property Location"
-        });
-        
-        // After Google Maps is initialized, load Leaflet
-        loadLeafletLibrary();
-        
-        console.log("Google Maps initialized successfully");
+        // Create the Google Map - add a small delay to ensure DOM is ready
+        setTimeout(() => {
+          try {
+            // Check again if container is available
+            if (!mapContainerRef.current) {
+              console.error("Map container is still not available after delay");
+              throw new Error("Map container not available - please try refreshing the page");
+            }
+            
+            console.log("Creating Google Map in container:", mapContainerRef.current);
+            
+            // Initialize the map with satellite view
+            const map = new window.google.maps.Map(mapContainerRef.current, {
+              center: { lat: validLat, lng: validLng },
+              zoom: 19,
+              mapTypeId: 'satellite',
+              tilt: 0,
+              mapTypeControl: false,
+              streetViewControl: false,
+              fullscreenControl: true,
+              zoomControl: true
+            });
+            
+            // Store the reference
+            googleMapRef.current = map;
+            
+            // Add a marker at the property location
+            new window.google.maps.Marker({
+              position: { lat: validLat, lng: validLng },
+              map: map,
+              title: address || "Property Location"
+            });
+            
+            // After Google Maps is initialized, load Leaflet
+            loadLeafletLibrary();
+            
+            console.log("Google Maps initialized successfully");
+          } catch (innerError) {
+            console.error("Error initializing Google Maps during delayed init:", innerError);
+            setError(innerError.message || "Failed to initialize Google Maps");
+            setLoading(false);
+            if (onMapError) onMapError(innerError.message || "Failed to initialize Google Maps");
+          }
+        }, 300); // Small delay to ensure DOM is ready
       } catch (error) {
         console.error("Error initializing Google Maps:", error);
         setError(error.message || "Failed to initialize Google Maps");
         setLoading(false);
-        clearInterval(progressInterval);
         if (onMapError) onMapError(error.message || "Failed to initialize Google Maps");
       }
     };
@@ -870,8 +907,10 @@ const HybridMapContainer = forwardRef(({
       return;
     }
     
-    // Start loading Google Maps
-    loadGoogleMapsAPI();
+    // Start loading Google Maps after a short delay to ensure DOM is ready
+    setTimeout(() => {
+      loadGoogleMapsAPI();
+    }, 200);
     
     // Cleanup function
     return () => {
@@ -936,7 +975,7 @@ const HybridMapContainer = forwardRef(({
     <div 
       ref={mapContainerRef} 
       className="absolute inset-0" 
-      style={{ width: '100%', height: '100%' }}
+      style={{ width: '100%', height: '100%', position: 'relative' }}
     >
       {/* Instruction overlay */}
       {enableDrawing && (
