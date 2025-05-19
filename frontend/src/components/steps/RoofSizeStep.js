@@ -93,9 +93,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       hasGoogleMapsApiKey: !!config.googleMapsApiKey,
       useLeaflet: config.useLeaflet,
       environmentStatus: {
-        leafletLoaded: typeof L !== 'undefined',
-        googleMapsLoaded: typeof google !== 'undefined' && typeof google.maps !== 'undefined',
-        windowEnv: window.ENV
+    leafletLoaded: typeof window.L !== 'undefined',
+    googleMapsLoaded: typeof window.google !== 'undefined' && 
+                      typeof window.google.maps !== 'undefined',
+    windowEnv: process.env
       }
     });
     
@@ -351,11 +352,11 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       roofPitch: formData.roofPitch,
       analysisMethod: formData.roofAnalysisMethod,
       environmentStatus: {
-        leafletLoaded: typeof L !== 'undefined',
-        googleMapsLoaded: typeof google !== 'undefined' && typeof google.maps !== 'undefined',
-        windowEnv: window.ENV,
-        config: config,
-        killSwitch: killSwitch
+      leafletLoaded: typeof window.L !== 'undefined',
+      googleMapsLoaded: typeof window.google !== 'undefined' && 
+                        typeof window.google.maps !== 'undefined',
+      config: config,
+      killSwitch: killSwitch
       }
     });
     
