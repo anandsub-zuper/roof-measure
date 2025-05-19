@@ -20,14 +20,17 @@ export function loadGoogleMapsApi() {
 
   console.log("Starting to load Google Maps API");
   loadingPromise = new Promise((resolve, reject) => {
-    const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
+    const API_KEY = (typeof window !== 'undefined' && window.googleMapsApiKey) || 
+                  process.env.REACT_APP_GOOGLE_MAPS_PUBLIC_KEY;
     
-    if (!API_KEY) {
-      console.error("Google Maps API key is missing in environment variables.");
-      console.log("Env variables available:", Object.keys(process.env).filter(key => key.startsWith('REACT_APP_')));
-      reject(new Error("Google Maps API key is missing. Check your environment variables."));
-      return;
-    }
+    
+  if (!API_KEY) {
+    console.error("Google Maps API key is missing in environment variables and window object.");
+    console.log("Env variables available:", Object.keys(process.env).filter(key => key.startsWith('REACT_APP_')));
+    console.log("Window API key:", typeof window !== 'undefined' ? (window.googleMapsApiKey ? "Present" : "Missing") : "Window not available");
+    reject(new Error("Google Maps API key is missing. Check your environment variables or index.html."));
+    return;
+  }
 
     console.log("Google Maps API Key:", API_KEY ? "Present (first 4 chars: " + API_KEY.substring(0,4) + "...)" : "MISSING");
 
