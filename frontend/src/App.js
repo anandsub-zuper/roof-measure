@@ -5,12 +5,19 @@ import EstimateForm from './components/EstimateForm';
 import ThankYouPage from './components/ThankYouPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import './App.css';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw/dist/leaflet.draw.css'; // This might be the issue
-import 'leaflet-measure/dist/leaflet-measure.css';
+
+// Removed duplicate CSS imports to avoid conflicts
 
 function App() {
   useEffect(() => {
+    // Check for map API availability
+    window.mapApiStatus = {
+      leaflet: typeof L !== 'undefined',
+      googleMaps: typeof google !== 'undefined' && typeof google.maps !== 'undefined'
+    };
+    
+    console.log('Map API availability:', window.mapApiStatus);
+    
     // Register service worker for PWA functionality
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
