@@ -15,173 +15,77 @@ const HybridMapContainer = forwardRef(({
   onMapError, 
   onPolygonCreated 
 }, ref) => {
-  // Refs for DOM elements and map instances
-  const mapContainerRef = useRef(null);
-  const leafletContainerRef = useRef(null);
+  const containerRef = useRef(null);
   const googleMapRef = useRef(null);
   const leafletMapRef = useRef(null);
   const drawnItemsRef = useRef(null);
   const drawnPolygonRef = useRef(null);
   
-  // State for UI management
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState('initializing');
   const [loadingProgress, setLoadingProgress] = useState(0);
-  const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
-  const [leafletLoaded, setLeafletLoaded] = useState(false);
   
-  // Validate coordinates
+  // Parse coordinates once to avoid re-parsing
   const validLat = parseFloat(lat);
   const validLng = parseFloat(lng);
   
-  // Expose methods via ref
+  // Expose methods through ref
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
       if (googleMapRef.current) {
         const currentZoom = googleMapRef.current.getZoom();
         googleMapRef.current.setZoom(currentZoom + 1);
-        
-        // Also update Leaflet if available
-        if (leafletMapRef.current) {
-          leafletMapRef.current.setZoom(currentZoom + 1);
-        }
       }
     },
     zoomOut: () => {
       if (googleMapRef.current) {
         const currentZoom = googleMapRef.current.getZoom();
-        googleMapRef.current.setZoom(currentZoom - 1);
-        
-        // Also update Leaflet if available
-        if (leafletMapRef.current) {
-          leafletMapRef.current.setZoom(currentZoom - 1);
-        }
+        googleMapRef.current.setZoom(Math.max(currentZoom - 1, 1));
       }
     },
     getMapInstance: () => googleMapRef.current,
     fitPolygon: () => {
-      try {
-        if (drawnPolygonRef.current) {
-          // If using Leaflet polygon
-          if (leafletMapRef.current && drawnPolygonRef.current.getBounds) {
-            leafletMapRef.current.fitBounds(drawnPolygonRef.current.getBounds());
-            
-            // Also fit Google Maps to the same bounds
-            if (googleMapRef.current) {
-              const bounds = drawnPolygonRef.current.getBounds();
-              const googleBounds = new window.google.maps.LatLngBounds(
-                new window.google.maps.LatLng(bounds.getSouth(), bounds.getWest()),
-                new window.google.maps.LatLng(bounds.getNorth(), bounds.getEast())
-              );
-              googleMapRef.current.fitBounds(googleBounds);
-            }
-          } 
-          // If using Google polygon
-          else if (googleMapRef.current && drawnPolygonRef.current.getPath) {
+      if (drawnPolygonRef.current && googleMapRef.current) {
+        try {
+          if (drawnPolygonRef.current.getBounds) {
+            // Leaflet polygon
+            const bounds = drawnPolygonRef.current.getBounds();
+            const googleBounds = new window.google.maps.LatLngBounds(
+              new window.google.maps.LatLng(bounds.getSouth(), bounds.getWest()),
+              new window.google.maps.LatLng(bounds.getNorth(), bounds.getEast())
+            );
+            googleMapRef.current.fitBounds(googleBounds);
+          } else if (drawnPolygonRef.current.getPath) {
+            // Google Maps polygon
             const bounds = new window.google.maps.LatLngBounds();
             const path = drawnPolygonRef.current.getPath();
             path.forEach(point => bounds.extend(point));
             googleMapRef.current.fitBounds(bounds);
           }
+        } catch (e) {
+          console.error("Error fitting to polygon:", e);
         }
-      } catch (e) {
-        console.warn("Error fitting to polygon:", e);
       }
     },
     updatePolygon: (newPropertyData) => {
-      try {
-        // Clear any existing polygon
-        clearExistingPolygon();
-        
-        // Generate new polygon
-        createRoofPolygon(newPropertyData);
-      } catch (e) {
-        console.error("Error updating polygon:", e);
-      }
+      createRoofPolygon(newPropertyData);
     }
   }));
   
-  // Clear existing polygon from both maps
-  const clearExistingPolygon = () => {
-    // Clear Google polygon
-    if (drawnPolygonRef.current) {
-      if (drawnPolygonRef.current.setMap) {
-        drawnPolygonRef.current.setMap(null);
-      } else if (drawnItemsRef.current && drawnItemsRef.current.clearLayers) {
-        drawnItemsRef.current.clearLayers();
-      }
-      drawnPolygonRef.current = null;
-    }
-  };
-  
-  // Calculate polygon area using the best available method
-  const calculatePolygonArea = (polygon) => {
+  // Calculate polygon area
+  const calculatePolygonArea = (coordinates) => {
     try {
-      console.log("Calculating area for polygon:", polygon);
-      
-      // Use property data if available for cross-validation
-      let propertyBasedArea = null;
-      if (propertyData && propertyData.buildingSize) {
-        const stories = propertyData.stories || 1;
-        const footprint = propertyData.buildingSize / stories;
-        
-        // Get pitch factor
-        const pitchFactor = {
-          'flat': 1.05,
-          'low': 1.15,
-          'moderate': 1.3,
-          'steep': 1.5
-        }[propertyData.roofPitch || 'moderate'] || 1.3;
-        
-        propertyBasedArea = Math.round(footprint * pitchFactor);
-        console.log("Property-based area calculation:", propertyBasedArea);
+      // Check if coordinates are valid
+      if (!coordinates || !Array.isArray(coordinates) || coordinates.length < 3) {
+        console.warn("Invalid coordinates for area calculation");
+        return roofSize || 2500;
       }
       
-      // Extract coordinates based on the type of polygon provided
-      let coordinates = [];
-      
-      // Handle different polygon types
-      if (polygon && typeof polygon === 'object') {
-        // Leaflet polygon
-        if (polygon.getLatLngs) {
-          const latLngs = polygon.getLatLngs();
-          if (Array.isArray(latLngs) && latLngs.length > 0) {
-            // Handle potentially nested arrays
-            const points = Array.isArray(latLngs[0]) ? latLngs[0] : latLngs;
-            coordinates = points.map(point => ({
-              lat: point.lat,
-              lng: point.lng
-            }));
-          }
-        } 
-        // Google Maps polygon
-        else if (polygon.getPath) {
-          const path = polygon.getPath();
-          for (let i = 0; i < path.getLength(); i++) {
-            const point = path.getAt(i);
-            coordinates.push({
-              lat: point.lat(),
-              lng: point.lng()
-            });
-          }
-        }
-      } 
-      // Direct array of coordinates
-      else if (Array.isArray(polygon)) {
-        coordinates = polygon;
-      }
-      
-      // Ensure we have enough points for a polygon
-      if (coordinates.length < 3) {
-        console.warn("Not enough coordinates for area calculation");
-        return propertyBasedArea || roofSize || 2500;
-      }
-      
-      // Try Turf.js for calculation (most accurate)
+      // Try to use Turf.js if available
       if (window.turf) {
         try {
-          // Format for Turf (it expects [lng, lat] format)
+          // Format for Turf (expects [lng, lat])
           const turfPoints = coordinates.map(coord => [coord.lng, coord.lat]);
           
           // Close the polygon if not already closed
@@ -191,96 +95,98 @@ const HybridMapContainer = forwardRef(({
             turfPoints.push(turfPoints[0]);
           }
           
-          // Create polygon and calculate area
+          // Calculate area
           const turfPolygon = window.turf.polygon([turfPoints]);
           const areaSqMeters = window.turf.area(turfPolygon);
           const areaSqFeet = Math.round(areaSqMeters * 10.7639);
           
-          console.log("Turf.js area calculation:", areaSqFeet);
-          
-          // Validate the calculation - if outside reasonable bounds, fall back
+          // Validate result
           if (areaSqFeet >= 500 && areaSqFeet <= 10000) {
             return areaSqFeet;
-          } else {
-            console.warn("Turf calculation outside reasonable bounds:", areaSqFeet);
           }
         } catch (e) {
           console.warn("Turf.js calculation error:", e);
         }
       }
       
-      // Try Google Maps geometry if available
-      if (window.google && window.google.maps && window.google.maps.geometry) {
+      // Fallback to Google Maps geometry
+      if (window.google?.maps?.geometry) {
         try {
-          const googleLatLngs = coordinates.map(point => 
-            new window.google.maps.LatLng(point.lat, point.lng)
-          );
-          
-          const areaSqMeters = window.google.maps.geometry.spherical.computeArea(googleLatLngs);
+          const googleLatLngs = coordinates.map(p => new google.maps.LatLng(p.lat, p.lng));
+          const areaSqMeters = google.maps.geometry.spherical.computeArea(googleLatLngs);
           const areaSqFeet = Math.round(areaSqMeters * 10.7639);
           
-          console.log("Google Maps area calculation:", areaSqFeet);
-          
-          // Validate the calculation
+          // Validate result
           if (areaSqFeet >= 500 && areaSqFeet <= 10000) {
             return areaSqFeet;
-          } else {
-            console.warn("Google calculation outside reasonable bounds:", areaSqFeet);
           }
         } catch (e) {
           console.warn("Google geometry calculation error:", e);
         }
       }
       
-      // If all else fails, use property-based, then original size
-      return propertyBasedArea || roofSize || 2500;
+      // Use property data estimate as fallback
+      if (propertyData?.buildingSize) {
+        const stories = propertyData.stories || 1;
+        const footprint = propertyData.buildingSize / stories;
+        const pitchFactor = {
+          'flat': 1.05, 'low': 1.15, 'moderate': 1.3, 'steep': 1.5
+        }[propertyData.roofPitch || 'moderate'] || 1.3;
+        
+        return Math.round(footprint * pitchFactor);
+      }
+      
+      // Last resort
+      return roofSize || 2500;
     } catch (error) {
-      console.error("Error in area calculation:", error);
+      console.error("Area calculation error:", error);
       return roofSize || 2500;
     }
   };
   
-  // Create roof polygon on the map
-  const createRoofPolygon = (customPropertyData = null) => {
+  // Create roof polygon
+  const createRoofPolygon = (customPropertyData) => {
     try {
-      // Use provided or custom property data
-      const dataToUse = customPropertyData || propertyData;
+      // Clear existing polygon
+      if (drawnPolygonRef.current) {
+        if (drawnPolygonRef.current.setMap) {
+          drawnPolygonRef.current.setMap(null);
+        } else if (drawnItemsRef.current?.clearLayers) {
+          drawnItemsRef.current.clearLayers();
+        }
+        drawnPolygonRef.current = null;
+      }
       
-      // Generate coordinates for the polygon
+      // Generate polygon coordinates
       let polygonCoords;
       
-      // Use provided polygon coordinates if available
+      // Use provided polygon if available
       if (roofPolygon && Array.isArray(roofPolygon) && roofPolygon.length >= 3) {
-        console.log("Using provided roof polygon coordinates");
         polygonCoords = roofPolygon;
-      }
+      } 
       // Otherwise generate based on property data
-      else if (dataToUse) {
-        console.log("Generating polygon based on property data");
-        polygonCoords = propertyPolygonGenerator.generatePropertyPolygon(
-          validLat, 
-          validLng, 
-          roofSize, 
-          dataToUse
-        );
-      }
-      // Fallback to size-based polygon
       else {
-        console.log("Generating size-based polygon");
-        polygonCoords = propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, roofSize);
+        const dataToUse = customPropertyData || propertyData;
+        
+        if (dataToUse) {
+          polygonCoords = propertyPolygonGenerator.generatePropertyPolygon(
+            validLat, validLng, roofSize, dataToUse
+          );
+        } else {
+          polygonCoords = propertyPolygonGenerator.generateSizeBasedPolygon(
+            validLat, validLng, roofSize
+          );
+        }
       }
       
-      // If we don't have enough points, bail out
-      if (!polygonCoords || polygonCoords.length < 3) {
-        console.warn("Not enough coordinates for polygon creation");
-        return null;
-      }
+      // Create the appropriate polygon
+      let polygon = null;
+      let area = 0;
       
-      // Try to create polygon using Leaflet if available - prioritize this approach
+      // If Leaflet is available and initialized, use it for the polygon
       if (window.L && leafletMapRef.current && drawnItemsRef.current) {
         try {
-          console.log("Creating Leaflet polygon");
-          const leafletPolygon = L.polygon(polygonCoords, {
+          polygon = L.polygon(polygonCoords, {
             color: '#2563EB',
             weight: 3,
             opacity: 1,
@@ -288,333 +194,271 @@ const HybridMapContainer = forwardRef(({
             fillOpacity: 0.4
           });
           
-          // Add to feature group and map
-          drawnItemsRef.current.addLayer(leafletPolygon);
-          
-          // Store reference
-          drawnPolygonRef.current = leafletPolygon;
+          drawnItemsRef.current.addLayer(polygon);
+          drawnPolygonRef.current = polygon;
           
           // Calculate area
-          const area = calculatePolygonArea(polygonCoords);
+          area = calculatePolygonArea(polygonCoords);
           
           // Fit bounds
-          leafletMapRef.current.fitBounds(leafletPolygon.getBounds());
+          const bounds = polygon.getBounds();
+          leafletMapRef.current.fitBounds(bounds);
           
-          // Also fit Google Maps to the same bounds
+          // Fit Google Maps too
           if (googleMapRef.current) {
-            const bounds = leafletPolygon.getBounds();
-            const googleBounds = new window.google.maps.LatLngBounds(
-              new window.google.maps.LatLng(bounds.getSouth(), bounds.getWest()),
-              new window.google.maps.LatLng(bounds.getNorth(), bounds.getEast())
+            const googleBounds = new google.maps.LatLngBounds(
+              new google.maps.LatLng(bounds.getSouth(), bounds.getWest()),
+              new google.maps.LatLng(bounds.getNorth(), bounds.getEast())
             );
             googleMapRef.current.fitBounds(googleBounds);
           }
-          
-          // Notify parent
-          if (onPolygonCreated) {
-            onPolygonCreated(leafletPolygon, area);
-          }
-          
-          return leafletPolygon;
         } catch (e) {
           console.warn("Error creating Leaflet polygon:", e);
-          // Continue to try Google Maps as fallback
+          // Fall back to Google Maps
         }
       }
       
-      // Try to create polygon using Google Maps if available (fallback)
-      if (window.google && window.google.maps && googleMapRef.current) {
+      // If no Leaflet polygon was created or it failed, use Google Maps
+      if (!polygon && googleMapRef.current) {
         try {
-          console.log("Creating Google Maps polygon");
-          const googlePolygon = new window.google.maps.Polygon({
+          polygon = new google.maps.Polygon({
             paths: polygonCoords,
             strokeColor: '#2563EB',
             strokeOpacity: 1.0,
             strokeWeight: 3,
             fillColor: '#2563EB',
             fillOpacity: 0.4,
-            map: googleMapRef.current,
-            editable: enableDrawing
+            map: googleMapRef.current
           });
           
-          // Store reference
-          drawnPolygonRef.current = googlePolygon;
+          drawnPolygonRef.current = polygon;
           
           // Calculate area
-          const area = calculatePolygonArea(polygonCoords);
+          area = calculatePolygonArea(polygonCoords);
           
           // Fit bounds
-          const bounds = new window.google.maps.LatLngBounds();
+          const bounds = new google.maps.LatLngBounds();
           polygonCoords.forEach(point => bounds.extend(point));
           googleMapRef.current.fitBounds(bounds);
-          
-          // Add drag listeners
-          if (enableDrawing) {
-            googlePolygon.addListener('dragend', () => {
-              const path = googlePolygon.getPath();
-              const newCoords = [];
-              for (let i = 0; i < path.getLength(); i++) {
-                const point = path.getAt(i);
-                newCoords.push({ lat: point.lat(), lng: point.lng() });
-              }
-              const area = calculatePolygonArea(newCoords);
-              if (onPolygonCreated) {
-                onPolygonCreated(googlePolygon, area);
-              }
-            });
-          }
-          
-          // Notify parent
-          if (onPolygonCreated) {
-            onPolygonCreated(googlePolygon, area);
-          }
-          
-          return googlePolygon;
         } catch (e) {
           console.error("Error creating Google Maps polygon:", e);
         }
       }
       
-      console.warn("Could not create polygon with either mapping library");
-      return null;
+      // Notify parent component
+      if (onPolygonCreated && polygon) {
+        onPolygonCreated(polygon, area);
+      }
+      
+      return polygon;
     } catch (error) {
-      console.error("Error in polygon creation:", error);
+      console.error("Error creating roof polygon:", error);
       return null;
     }
   };
   
-  // Let's also fix how we handle the initial load
+  // Initialize maps
   useEffect(() => {
-    let timeoutId;
-    let progressInterval = setInterval(() => {
-      setLoadingProgress(prev => Math.min(prev + 5, 40));
-    }, 1000);
+    console.log("HybridMapContainer initialization started");
+    let progressTimer;
+    let timeoutTimer;
     
-    const loadGoogleMapsAPI = async () => {
-      try {
-        setLoadingStatus('loading Google Maps');
-        
-        // Set a timeout to prevent hanging
-        timeoutId = setTimeout(() => {
-          setError("Google Maps loading timed out after 30 seconds");
-          setLoading(false);
-          clearInterval(progressInterval);
-          if (onMapError) onMapError("Loading timed out");
-        }, 30000);
-        
-        // Ensure the container is ready
-        if (!mapContainerRef.current) {
-          console.log("Waiting for map container to be available...");
-          
-          // Check every 100ms until it's available or timeout is reached
-          let checkAttempts = 0;
-          const checkContainer = setInterval(() => {
-            checkAttempts++;
-            if (mapContainerRef.current) {
-              console.log("Map container is now available after " + checkAttempts + " attempts");
-              clearInterval(checkContainer);
-              continueLoading();
-            } else if (checkAttempts > 50) { // 5 seconds max
-              clearInterval(checkContainer);
-              throw new Error("Map container never became available");
-            }
-          }, 100);
-          
-          return; // Exit and let the interval handle it
-        } else {
-          continueLoading();
-        }
-        
-        function continueLoading() {
-          // Check if already loaded
-          if (window.google && window.google.maps) {
-            console.log("Google Maps already loaded");
-            clearTimeout(timeoutId);
-            setGoogleMapsLoaded(true);
-            setLoadingProgress(50);
-            
-            // Go ahead and initialize the map
-            initializeGoogleMap();
-            return;
-          }
-          
-          // Get API key
-          const apiKey = config.googleMapsApiKey;
-          
-          if (!apiKey) {
-            throw new Error("Google Maps API key is missing from configuration");
-          }
-          
-          // Load Google Maps API
-          window.initGoogleMapsCallback = () => {
-            console.log("Google Maps loaded successfully");
-            clearTimeout(timeoutId);
-            setGoogleMapsLoaded(true);
-            setLoadingProgress(50);
-            
-            // Initialize the map
-            initializeGoogleMap();
-            delete window.initGoogleMapsCallback;
-          };
-          
-          // Create script tag
-          const script = document.createElement('script');
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,drawing&callback=initGoogleMapsCallback`;
-          script.async = true;
-          script.defer = true;
-          
-          script.onerror = (error) => {
-            console.error("Error loading Google Maps script:", error);
-            clearTimeout(timeoutId);
-            setError("Failed to load Google Maps. Please check your internet connection.");
+    // Set up progress indication
+    progressTimer = setInterval(() => {
+      setLoadingProgress(prev => Math.min(prev + 5, 90));
+    }, 500);
+    
+    // Set up timeout to avoid hanging
+    timeoutTimer = setTimeout(() => {
+      setError("Map loading timed out after 30 seconds");
+      setLoading(false);
+      clearInterval(progressTimer);
+      if (onMapError) onMapError("Loading timed out");
+    }, 30000);
+    
+    // Validate coordinates
+    if (isNaN(validLat) || isNaN(validLng)) {
+      const errorMsg = `Invalid coordinates: ${lat}, ${lng}`;
+      setError(errorMsg);
+      setLoading(false);
+      clearInterval(progressTimer);
+      clearTimeout(timeoutTimer);
+      if (onMapError) onMapError(errorMsg);
+      return;
+    }
+    
+    // Initialize Google Maps first
+    const initializeGoogleMaps = () => {
+      // Simpler loading approach that doesn't depend on container refs
+      if (window.google && window.google.maps) {
+        console.log("Google Maps already loaded, initializing map");
+        createGoogleMap();
+      } else {
+        console.log("Loading Google Maps API...");
+        // Load script
+        loadGoogleMapsScript()
+          .then(() => {
+            console.log("Google Maps API loaded, creating map");
+            createGoogleMap();
+          })
+          .catch(error => {
+            console.error("Failed to load Google Maps:", error);
+            setError("Could not load Google Maps: " + error.message);
             setLoading(false);
-            clearInterval(progressInterval);
-            if (onMapError) onMapError("Google Maps script failed to load");
-          };
-          
-          document.head.appendChild(script);
-        }
-      } catch (error) {
-        console.error("Error loading Google Maps:", error);
-        clearTimeout(timeoutId);
-        setError(error.message || "Failed to load Google Maps");
-        setLoading(false);
-        clearInterval(progressInterval);
-        if (onMapError) onMapError(error.message || "Failed to load Google Maps");
+            clearInterval(progressTimer);
+            clearTimeout(timeoutTimer);
+            if (onMapError) onMapError(error.message);
+          });
       }
     };
     
-    const initializeGoogleMap = () => {
-      try {
-        setLoadingStatus('creating map');
-        setLoadingProgress(prev => Math.min(prev + 10, 70));
-        
-        // Create the Google Map - add a small delay to ensure DOM is ready
-        setTimeout(() => {
-          try {
-            // Check again if container is available
-            if (!mapContainerRef.current) {
-              console.error("Map container is still not available after delay");
-              throw new Error("Map container not available - please try refreshing the page");
-            }
-            
-            console.log("Creating Google Map in container:", mapContainerRef.current);
-            
-            // Initialize the map with satellite view
-            const map = new window.google.maps.Map(mapContainerRef.current, {
-              center: { lat: validLat, lng: validLng },
-              zoom: 19,
-              mapTypeId: 'satellite',
-              tilt: 0,
-              mapTypeControl: false,
-              streetViewControl: false,
-              fullscreenControl: true,
-              zoomControl: true
-            });
-            
-            // Store the reference
-            googleMapRef.current = map;
-            
-            // Add a marker at the property location
-            new window.google.maps.Marker({
-              position: { lat: validLat, lng: validLng },
-              map: map,
-              title: address || "Property Location"
-            });
-            
-            // After Google Maps is initialized, load Leaflet
-            loadLeafletLibrary();
-            
-            console.log("Google Maps initialized successfully");
-          } catch (innerError) {
-            console.error("Error initializing Google Maps during delayed init:", innerError);
-            setError(innerError.message || "Failed to initialize Google Maps");
-            setLoading(false);
-            if (onMapError) onMapError(innerError.message || "Failed to initialize Google Maps");
-          }
-        }, 300); // Small delay to ensure DOM is ready
-      } catch (error) {
-        console.error("Error initializing Google Maps:", error);
-        setError(error.message || "Failed to initialize Google Maps");
-        setLoading(false);
-        if (onMapError) onMapError(error.message || "Failed to initialize Google Maps");
-      }
-    };
-    
-    const loadLeafletLibrary = () => {
-      try {
-        setLoadingStatus('loading Leaflet');
-        setLoadingProgress(prev => Math.min(prev + 10, 80));
-        
-        // Check if Leaflet is already loaded
-        if (window.L) {
-          console.log("Leaflet already loaded");
-          setLeafletLoaded(true);
-          initializeLeafletMap();
+    // Load Google Maps script
+    const loadGoogleMapsScript = () => {
+      return new Promise((resolve, reject) => {
+        // Get API key
+        const apiKey = config.googleMapsApiKey;
+        if (!apiKey) {
+          reject(new Error("Google Maps API key missing from configuration"));
           return;
         }
         
-        // Create Leaflet CSS link
-        const leafletCss = document.createElement('link');
-        leafletCss.rel = 'stylesheet';
-        leafletCss.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        leafletCss.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-        leafletCss.crossOrigin = '';
-        document.head.appendChild(leafletCss);
-        
-        // Create Leaflet Draw CSS link
-        const leafletDrawCss = document.createElement('link');
-        leafletDrawCss.rel = 'stylesheet';
-        leafletDrawCss.href = 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css';
-        document.head.appendChild(leafletDrawCss);
-        
-        // Load Leaflet script
-        const leafletScript = document.createElement('script');
-        leafletScript.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        leafletScript.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-        leafletScript.crossOrigin = '';
-        document.head.appendChild(leafletScript);
-        
-        leafletScript.onload = () => {
-          console.log("Leaflet loaded successfully");
-          
-          // Now load Leaflet Draw
-          const leafletDrawScript = document.createElement('script');
-          leafletDrawScript.src = 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js';
-          document.head.appendChild(leafletDrawScript);
-          
-          leafletDrawScript.onload = () => {
-            console.log("Leaflet Draw loaded successfully");
-            setLeafletLoaded(true);
-            initializeLeafletMap();
-          };
-          
-          leafletDrawScript.onerror = (error) => {
-            console.error("Failed to load Leaflet Draw:", error);
-            // Continue anyway with just Leaflet
-            setLeafletLoaded(true);
-            initializeLeafletMap();
-          };
+        // Create callback function
+        window.initGoogleMapsCallback = () => {
+          console.log("Google Maps callback executed");
+          resolve();
+          delete window.initGoogleMapsCallback;
         };
         
-        leafletScript.onerror = (error) => {
-          console.error("Failed to load Leaflet:", error);
-          // Continue without Leaflet, using just Google Maps
-          completeInitialization();
+        // Create script tag
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,drawing&callback=initGoogleMapsCallback`;
+        script.async = true;
+        script.defer = true;
+        
+        script.onerror = () => {
+          reject(new Error("Google Maps script failed to load"));
         };
+        
+        document.head.appendChild(script);
+      });
+    };
+    
+    // Create Google Map
+    const createGoogleMap = () => {
+      try {
+        setLoadingStatus('creating Google map');
+        
+        // Make sure container is available
+        if (!containerRef.current) {
+          console.error("Map container not available");
+          setError("Map container not available - please reload the page");
+          setLoading(false);
+          clearInterval(progressTimer);
+          clearTimeout(timeoutTimer);
+          if (onMapError) onMapError("Map container not available");
+          return;
+        }
+        
+        // Create the map
+        const map = new google.maps.Map(containerRef.current, {
+          center: { lat: validLat, lng: validLng },
+          zoom: 19,
+          mapTypeId: 'satellite',
+          tilt: 0,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+          zoomControl: true
+        });
+        
+        // Store reference
+        googleMapRef.current = map;
+        
+        // Add marker
+        new google.maps.Marker({
+          position: { lat: validLat, lng: validLng },
+          map: map,
+          title: address || "Property Location"
+        });
+        
+        // Now load Leaflet
+        loadLeaflet();
       } catch (error) {
-        console.error("Error loading Leaflet:", error);
-        // Continue without Leaflet
-        completeInitialization();
+        console.error("Error creating Google Map:", error);
+        setError("Failed to create map: " + error.message);
+        setLoading(false);
+        clearInterval(progressTimer);
+        clearTimeout(timeoutTimer);
+        if (onMapError) onMapError(error.message);
       }
     };
     
-    const initializeLeafletMap = () => {
+    // Load Leaflet
+    const loadLeaflet = () => {
       try {
-        setLoadingStatus('initializing Leaflet');
-        setLoadingProgress(prev => Math.min(prev + 10, 90));
+        setLoadingStatus('initializing drawing tools');
         
-        // Create a separate container for Leaflet that overlays the Google Map
+        // If Leaflet is already loaded, initialize
+        if (window.L) {
+          console.log("Leaflet already loaded, initializing");
+          initializeLeaflet();
+          return;
+        }
+        
+        // Load Leaflet CSS and JS
+        console.log("Loading Leaflet libraries...");
+        
+        // Load CSS first
+        const loadCSS = (href) => {
+          return new Promise((resolve) => {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href;
+            link.onload = resolve;
+            document.head.appendChild(link);
+          });
+        };
+        
+        // Load script
+        const loadScript = (src) => {
+          return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+        };
+        
+        // Load all Leaflet resources
+        Promise.all([
+          loadCSS('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'),
+          loadCSS('https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css')
+        ])
+        .then(() => loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'))
+        .then(() => loadScript('https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js'))
+        .then(() => {
+          console.log("Leaflet libraries loaded");
+          initializeLeaflet();
+        })
+        .catch(error => {
+          console.warn("Error loading Leaflet, continuing with just Google Maps:", error);
+          // Just proceed without Leaflet
+          finishInitialization();
+        });
+      } catch (error) {
+        console.warn("Error setting up Leaflet:", error);
+        // Continue without Leaflet
+        finishInitialization();
+      }
+    };
+    
+    // Initialize Leaflet
+    const initializeLeaflet = () => {
+      try {
+        console.log("Initializing Leaflet overlay");
+        
+        // Create a container for Leaflet
         const leafletContainer = document.createElement('div');
         leafletContainer.style.position = 'absolute';
         leafletContainer.style.top = '0';
@@ -622,20 +466,12 @@ const HybridMapContainer = forwardRef(({
         leafletContainer.style.width = '100%';
         leafletContainer.style.height = '100%';
         leafletContainer.style.zIndex = '1000';
-        leafletContainer.style.pointerEvents = 'none'; // Initially transparent to clicks
-        leafletContainer.id = 'leaflet-container';
+        leafletContainer.style.pointerEvents = 'none';
         
-        // Store in ref for later use
-        leafletContainerRef.current = leafletContainer;
+        // Append to main container
+        containerRef.current.appendChild(leafletContainer);
         
-        // Add the container to the map container
-        if (mapContainerRef.current) {
-          mapContainerRef.current.appendChild(leafletContainer);
-        } else {
-          throw new Error("Map container not found");
-        }
-        
-        // Initialize Leaflet map with empty tile layer (transparent)
+        // Create Leaflet map
         const map = L.map(leafletContainer, {
           center: [validLat, validLng],
           zoom: googleMapRef.current ? googleMapRef.current.getZoom() : 19,
@@ -643,12 +479,10 @@ const HybridMapContainer = forwardRef(({
           attributionControl: false
         });
         
-        // Add an empty/transparent tile layer
-        L.tileLayer('', {
-          opacity: 0
-        }).addTo(map);
+        // Add empty tile layer
+        L.tileLayer('', { opacity: 0 }).addTo(map);
         
-        // Store the Leaflet map reference
+        // Store reference
         leafletMapRef.current = map;
         
         // Create feature group for drawings
@@ -656,10 +490,8 @@ const HybridMapContainer = forwardRef(({
         map.addLayer(drawnItems);
         drawnItemsRef.current = drawnItems;
         
-        // Initialize drawing controls if Leaflet Draw is available
-        if (window.L.Control && window.L.Control.Draw && enableDrawing) {
-          console.log("Setting up Leaflet Draw controls");
-          
+        // Add drawing controls if available
+        if (L.Control.Draw && enableDrawing) {
           const drawControl = new L.Control.Draw({
             position: 'topright',
             draw: {
@@ -685,27 +517,27 @@ const HybridMapContainer = forwardRef(({
           
           map.addControl(drawControl);
           
-          // Enable pointer events when drawing starts
+          // Handle draw events
           map.on(L.Draw.Event.DRAWSTART, () => {
             leafletContainer.style.pointerEvents = 'auto';
           });
           
-          // Disable pointer events when drawing stops
           map.on(L.Draw.Event.DRAWSTOP, () => {
             leafletContainer.style.pointerEvents = 'none';
           });
           
-          // Handle creation of new drawings
-          map.on(L.Draw.Event.CREATED, (event) => {
+          map.on(L.Draw.Event.CREATED, event => {
             // Clear existing drawings
             drawnItems.clearLayers();
             
-            // Add the new layer
             const layer = event.layer;
             drawnItems.addLayer(layer);
             
             // Store reference
             drawnPolygonRef.current = layer;
+            
+            // Mark as user-created
+            layer._userCreated = true;
             
             // Calculate area
             const latLngs = layer.getLatLngs()[0];
@@ -716,77 +548,55 @@ const HybridMapContainer = forwardRef(({
             
             const area = calculatePolygonArea(coordinates);
             
-            // Mark as user-created
-            layer._userCreated = true;
-            
             // Notify parent
             if (onPolygonCreated) {
               onPolygonCreated(layer, area);
             }
             
-            // Revert to pointer-events none
+            // Reset pointer events
             leafletContainer.style.pointerEvents = 'none';
           });
           
-          // Handle editing existing drawings
-          map.on(L.Draw.Event.EDITED, (event) => {
-            const layers = event.layers;
-            layers.eachLayer((layer) => {
-              const latLngs = layer.getLatLngs()[0];
-              const coordinates = latLngs.map(point => ({
-                lat: point.lat,
-                lng: point.lng
-              }));
-              
-              const area = calculatePolygonArea(coordinates);
-              
-              // Notify parent
-              if (onPolygonCreated) {
-                onPolygonCreated(layer, area);
-              }
-            });
-          });
+          // Custom buttons for easier access
+          addCustomControls(map, leafletContainer);
         }
-        
-        // Add custom buttons for measurement and drawing
-        addCustomControls(map, leafletContainer);
         
         // Sync with Google Maps
         if (googleMapRef.current) {
-          window.google.maps.event.addListener(googleMapRef.current, 'bounds_changed', () => {
+          google.maps.event.addListener(googleMapRef.current, 'bounds_changed', () => {
             const center = googleMapRef.current.getCenter();
             const zoom = googleMapRef.current.getZoom();
             
-            if (center && zoom && map) {
+            if (center && zoom) {
               map.setView([center.lat(), center.lng()], zoom, { animate: false });
             }
           });
         }
         
-        // Show initial polygon
+        // Create initial polygon
         setTimeout(() => {
           createRoofPolygon();
         }, 300);
         
-        // Finish initialization
-        completeInitialization();
+        finishInitialization();
       } catch (error) {
-        console.error("Error initializing Leaflet:", error);
+        console.warn("Error initializing Leaflet:", error);
         // Continue with just Google Maps
-        completeInitialization();
+        finishInitialization();
       }
     };
     
+    // Add custom map controls
     const addCustomControls = (map, container) => {
-      // Draw Button
+      // Draw button
       const drawButton = L.control({ position: 'topright' });
       drawButton.onAdd = function() {
         const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
         div.innerHTML = `
           <a href="#" title="Draw Roof Outline" 
-             style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; font-size: 16px; 
-                    font-weight: bold; color: #2563EB; text-decoration: none; background-color: white; border-radius: 4px; 
-                    box-shadow: 0 1px 5px rgba(0,0,0,0.4); margin-bottom: 5px;">
+             style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; 
+                    font-size: 16px; font-weight: bold; color: #2563EB; background-color: white; 
+                    border-radius: 4px; box-shadow: 0 1px 5px rgba(0,0,0,0.4); text-decoration: none;">
             ✏️
           </a>
         `;
@@ -801,8 +611,8 @@ const HybridMapContainer = forwardRef(({
             drawnItemsRef.current.clearLayers();
           }
           
-          // Start polygon drawing
-          if (window.L.Draw && map) {
+          // Start drawing
+          if (L.Draw && map) {
             new L.Draw.Polygon(map, {
               showArea: true,
               shapeOptions: {
@@ -818,104 +628,33 @@ const HybridMapContainer = forwardRef(({
         return div;
       };
       
-      if (enableDrawing && window.L.Draw) {
+      // Add button to map
+      if (enableDrawing) {
         drawButton.addTo(map);
       }
-      
-      // Measure Button
-      const measureButton = L.control({ position: 'topright' });
-      measureButton.onAdd = function() {
-        const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
-        div.innerHTML = `
-          <a href="#" title="Measure Roof Area" 
-             style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; font-size: 16px; 
-                    font-weight: bold; color: #2563EB; text-decoration: none; background-color: white; border-radius: 4px; 
-                    box-shadow: 0 1px 5px rgba(0,0,0,0.4);">
-            📏
-          </a>
-        `;
-        
-        L.DomEvent.disableClickPropagation(div);
-        div.onclick = () => {
-          if (drawnPolygonRef.current) {
-            try {
-              let area = 0;
-              
-              // Get coordinates from the active polygon
-              if (drawnPolygonRef.current.getLatLngs) {
-                const latLngs = drawnPolygonRef.current.getLatLngs()[0];
-                const coordinates = latLngs.map(point => ({
-                  lat: point.lat,
-                  lng: point.lng
-                }));
-                
-                area = calculatePolygonArea(coordinates);
-              } else if (drawnPolygonRef.current.getPath) {
-                const path = drawnPolygonRef.current.getPath();
-                const coordinates = [];
-                for (let i = 0; i < path.getLength(); i++) {
-                  const point = path.getAt(i);
-                  coordinates.push({
-                    lat: point.lat(),
-                    lng: point.lng()
-                  });
-                }
-                
-                area = calculatePolygonArea(coordinates);
-              }
-              
-              // Display the result
-              alert(`Roof Area: ${area} square feet`);
-            } catch (e) {
-              console.error("Error measuring area:", e);
-              alert("Could not measure area: " + e.message);
-            }
-          } else {
-            alert("Please draw a roof outline first using the drawing tools.");
-          }
-          
-          return false;
-        };
-        
-        return div;
-      };
-      
-      measureButton.addTo(map);
     };
     
-    const completeInitialization = () => {
-      setLoadingProgress(100);
+    // Finish initialization
+    const finishInitialization = () => {
       setLoading(false);
-      clearInterval(progressInterval);
+      clearInterval(progressTimer);
+      clearTimeout(timeoutTimer);
       
-      console.log("Map initialization complete");
-      
-      // Notify parent component
+      // Notify parent
       if (onMapReady) {
         onMapReady(googleMapRef.current);
       }
     };
     
-    // Start the initialization process
-    // First, validate coordinates
-    if (isNaN(validLat) || isNaN(validLng)) {
-      const errorMsg = `Invalid coordinates: ${lat}, ${lng}`;
-      setError(errorMsg);
-      setLoading(false);
-      clearInterval(progressInterval);
-      if (onMapError) onMapError(errorMsg);
-      return;
-    }
-    
-    // Start loading Google Maps after a short delay to ensure DOM is ready
+    // Start initialization after a small delay to ensure container is rendered
     setTimeout(() => {
-      loadGoogleMapsAPI();
-    }, 200);
+      initializeGoogleMaps();
+    }, 250);
     
-    // Cleanup function
+    // Cleanup
     return () => {
-      clearInterval(progressInterval);
-      if (timeoutId) clearTimeout(timeoutId);
+      clearInterval(progressTimer);
+      clearTimeout(timeoutTimer);
       
       // Clean up Google Maps
       if (googleMapRef.current && window.google?.maps?.event) {
@@ -927,7 +666,10 @@ const HybridMapContainer = forwardRef(({
         leafletMapRef.current.remove();
       }
     };
-  }, [validLat, validLng, address, roofSize, propertyData, roofPolygon, enableDrawing, onMapReady, onMapError, onPolygonCreated]);
+  }, [
+    validLat, validLng, address, roofSize, propertyData, roofPolygon,
+    enableDrawing, onMapReady, onMapError, onPolygonCreated
+  ]);
   
   // Error display
   if (error) {
@@ -956,7 +698,8 @@ const HybridMapContainer = forwardRef(({
       <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 mb-2">Loading map... ({loadingStatus})</p>
+          <p className="text-gray-600 mb-2">Loading satellite imagery...</p>
+          <p className="text-gray-500 text-sm">({loadingStatus})</p>
           
           {/* Loading progress bar */}
           <div className="w-64 h-2 bg-gray-200 rounded-full mt-2 mb-2 mx-auto">
@@ -965,17 +708,27 @@ const HybridMapContainer = forwardRef(({
               style={{ width: `${loadingProgress}%` }}
             ></div>
           </div>
+          
+          <button 
+            onClick={() => {
+              setLoading(false);
+              if (onMapError) onMapError("User skipped map");
+            }}
+            className="mt-4 text-xs text-blue-500 hover:text-blue-700 underline"
+          >
+            Skip map view
+          </button>
         </div>
       </div>
     );
   }
   
-  // Main container
+  // Render the map container
   return (
     <div 
-      ref={mapContainerRef} 
-      className="absolute inset-0" 
-      style={{ width: '100%', height: '100%', position: 'relative' }}
+      ref={containerRef}
+      className="relative w-full h-full"
+      style={{ width: '100%', height: '100%' }}
     >
       {/* Instruction overlay */}
       {enableDrawing && (
