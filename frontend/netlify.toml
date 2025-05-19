@@ -13,6 +13,10 @@
   NODE_OPTIONS = "--max-old-space-size=4096"
   # Force Netlify to use Node 16 which has better compatibility with these packages
   NODE_VERSION = "16"
+  # Enable Leaflet map as alternative to Google Maps
+  REACT_APP_ENABLE_LEAFLET = "true"
+  # Do not disable Google Maps outright, let config logic decide
+  REACT_APP_DISABLE_GOOGLE_MAPS = "false"
 
 # Redirect API requests to your backend server
 [[redirects]]
@@ -21,18 +25,6 @@
   status = 200
   force = true
 
-# Add specific redirect for CSS files that might be dynamically imported
-[[redirects]]
-  from = "/static/css/*"
-  to = "/static/css/:splat"
-  status = 200
-
-# Add redirect for node_modules content that might be needed at runtime
-[[redirects]]
-  from = "/node_modules/*"
-  to = "/node_modules/:splat"
-  status = 200
-  
 # Fallback for React Router (SPA)
 [[redirects]]
   from = "/*"
