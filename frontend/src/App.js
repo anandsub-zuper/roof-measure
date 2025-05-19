@@ -5,6 +5,9 @@ import EstimateForm from './components/EstimateForm';
 import ThankYouPage from './components/ThankYouPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import './App.css';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-draw/dist/leaflet.draw.css'; // This might be the issue
+import 'leaflet-measure/dist/leaflet-measure.css';
 
 function App() {
   useEffect(() => {
