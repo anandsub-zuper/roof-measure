@@ -13,10 +13,15 @@ const LeafletMeasurementOverlay = ({
   const leafletContainerRef = useRef(null);
   const leafletMapRef = useRef(null);
   const polygonLayerRef = useRef(null);
+
+  const apiKey = (typeof window !== 'undefined' && window.googleMapsApiKey) || 
+               config.googleMapsApiKey;
   
   // Initialize Leaflet map and sync with Google Maps
   useEffect(() => {
     if (!leafletContainerRef.current || !googleMapInstance || !window.L) return;
+    
+
     
     // Create container that overlays exactly on Google Maps
     const container = leafletContainerRef.current;
