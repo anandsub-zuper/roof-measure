@@ -30,6 +30,11 @@
       "react-app",
       "react-app/jest"
     ]
+    "globals": {
+    "google": "readonly",
+    "L": "readonly",
+    "turf": "readonly"
+  }
   },
   "browserslist": {
     "production": [
