@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight, Building, Info } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
-import LeafletMapContainer from '../map/LeafletMapContainer';
+import HybridMapContainer from '../map/HybridMapContainer';
 import config from '../../config';
 import killSwitch from '../../killSwitch';
 import { debounce } from '../../utils/debounce';
@@ -24,7 +24,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const loadingTimerRef = useRef(null);
   
   // Increase the map loading timeout
-  const MAP_LOADING_TIMEOUT = 30000; // 30 seconds instead of 15
+  const MAP_LOADING_TIMEOUT = 30000; // 30 seconds
   
   // Calculate estimated roof size based on property data (as a reference point)
   const estimatedSizeFromProperty = useMemo(() => {
@@ -86,20 +86,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
   // Check if map should be disabled
   useEffect(() => {
-    // Log the current configuration for debugging
-    console.log("Map configuration:", {
-      googleMapsDisabled: window.googleMapsDisabled,
-      killSwitchMaps: killSwitch.googleMaps,
-      hasGoogleMapsApiKey: !!config.googleMapsApiKey,
-      useLeaflet: config.useLeaflet,
-      environmentStatus: {
-    leafletLoaded: typeof window.L !== 'undefined',
-    googleMapsLoaded: typeof window.google !== 'undefined' && 
-                      typeof window.google.maps !== 'undefined',
-    windowEnv: process.env
-      }
-    });
-    
     // Check for the flag set in config.js
     if (window.googleMapsDisabled || (killSwitch && killSwitch.googleMaps)) {
       console.log("Maps disabled, skipping map view");
@@ -181,9 +167,9 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize, updateFormData]);
 
-  // Handle polygon creation with improved Leaflet measurement
+  // Handle polygon creation with measurement
   const handlePolygonCreated = useCallback((polygon, area) => {
-    console.log("Polygon created with Leaflet measurement:", area);
+    console.log("Polygon created with measurement:", area);
     
     // Store the polygon for reference
     updateFormData('polygonFeature', polygon);
@@ -235,12 +221,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       }
     }
     
-    // Use Leaflet measurement when it's reasonable or when other sources aren't available
+    // Use measurement when it's reasonable or when other sources aren't available
     if (area && area > 500 && area < 10000) {
-      console.log("Using Leaflet polygon measurement:", area);
+      console.log("Using polygon measurement:", area);
       setLocalRoofSize(area);
       updateFormData('roofSize', area);
-      updateFormData('sizingMethod', 'leaflet_measurement');
+      updateFormData('sizingMethod', 'hybrid_measurement');
     } else if (estimatedSizeFromProperty) {
       // Fall back to property-based estimation
       console.log("Using property-based estimation:", estimatedSizeFromProperty);
@@ -264,13 +250,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     // Restore roof size based on different sources when returning to auto
     if (isAuto) {
       // Priority: 
-      // 1. Leaflet polygon measurement if available
+      // 1. Polygon measurement if available
       // 2. Use backend-calculated area if available
       // 3. Use property-based calculation if available
       // 4. Fall back to initial size
       
       if (formData.polygonArea && formData.polygonArea > 500) {
-        console.log("Restoring Leaflet polygon measurement");
+        console.log("Restoring polygon measurement");
         setLocalRoofSize(formData.polygonArea);
         updateFormData('roofSize', formData.polygonArea);
       } else if (formData.initialRoofSize) {
@@ -350,14 +336,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       estimatedFromProperty: estimatedSizeFromProperty,
       roofShape: formData.roofShape,
       roofPitch: formData.roofPitch,
-      analysisMethod: formData.roofAnalysisMethod,
-      environmentStatus: {
-      leafletLoaded: typeof window.L !== 'undefined',
-      googleMapsLoaded: typeof window.google !== 'undefined' && 
-                        typeof window.google.maps !== 'undefined',
-      config: config,
-      killSwitch: killSwitch
-      }
+      analysisMethod: formData.roofAnalysisMethod
     });
     
     if (formData.roofPolygon) {
@@ -408,7 +387,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
     
     return (
-      <LeafletMapContainer
+      <HybridMapContainer
         ref={mapContainerRef}
         lat={coordinates.lat}
         lng={coordinates.lng}
@@ -440,8 +419,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         return "Calculated from property records (fallback)";
       case "satellite_imagery":
         return "Satellite imagery analysis";
-      case "leaflet_measurement":
-        return "Precision satellite measurement";
+      case "hybrid_measurement":
+        return "Interactive satellite measurement";
+      case "user_drawn":
+        return "Custom user-drawn measurement";
       default:
         return formData.roofAnalysisMethod.replace(/_/g, ' ');
     }
@@ -573,8 +554,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
                     "Our AI analyzed satellite imagery of your roof to determine its size, shape, and pitch." :
                     formData.roofAnalysisMethod === "property_data_calculation" ?
                     "This estimate is calculated from property records, including the building size and number of stories." :
-                    formData.roofAnalysisMethod === "leaflet_measurement" ?
+                    formData.roofAnalysisMethod === "hybrid_measurement" ?
                     "This measurement is calculated using interactive satellite mapping with precision tools." :
+                    formData.roofAnalysisMethod === "user_drawn" ?
+                    "This measurement is based on your custom roof outline." :
                     "This estimate is based on multiple sources of data combined to give you the most accurate measurement."}
                 </p>
                 {formData.roofAnalysisNotes && (
@@ -612,6 +595,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             className={`w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-primary-300 focus:border-primary-500 focus:outline-none ${formData.roofSizeAuto ? 'bg-gray-100' : ''}`}
           />
         </div>
+      </div>
+
+      {/* Draw Roof Outline Help Text */}
+      <div className="w-full bg-green-50 p-3 rounded-lg border border-green-200 mb-6 text-sm">
+        <p className="text-green-800 font-medium">💡 Tip: Draw Your Own Roof</p>
+        <p className="text-green-700 mt-1">Use the "Draw Roof" button in the top-right corner of the map to outline your roof for a precise measurement.</p>
       </div>
 
       {/* Navigation Buttons */}
