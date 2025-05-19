@@ -37,12 +37,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-    <!-- Preload Critical Assets -->
-    <link rel="preload" href="%PUBLIC_URL%/static/js/main.chunk.js" as="script">
-    <link rel="preload" href="%PUBLIC_URL%/static/js/bundle.js" as="script">
     
-    <!-- Leaflet CSS from CDN -->
+    <!-- Leaflet assets - consolidated to avoid duplication conflicts -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
           crossorigin=""/>
@@ -59,11 +55,15 @@
     
     <div id="root"></div>
     
-    <!-- Application entry point will be injected by the build process -->
-    
-    <!-- Optional: Leaflet JS from CDN -->
+    <!-- Leaflet JS libraries - load before app for faster initialization -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"
+            crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet-measure@3.1.0/dist/leaflet-measure.min.js"
+            crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"
             crossorigin=""></script>
   </body>
 </html>
