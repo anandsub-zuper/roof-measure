@@ -11,23 +11,32 @@ const config = {
                window.location.hostname === '127.0.0.1',
                
   // Feature flags
-  useLeaflet: process.env.REACT_APP_ENABLE_LEAFLET === 'true' || true
+  useLeaflet: true,
+  useGoogleMaps: true,
+  
+  // Timeouts
+  mapLoadingTimeout: 60000 // 60 seconds
 };
 
-// Debug environment variables in console
+// Debug output for troubleshooting
 console.log('Config loaded:', {
   apiUrl: config.apiUrl,
   googleMapsApiKey: config.googleMapsApiKey ? 
     `Present (length: ${config.googleMapsApiKey.length})` : 'Missing',
   env: process.env.NODE_ENV,
   hostname: window.location.hostname,
-  useLeaflet: config.useLeaflet
+  useLeaflet: config.useLeaflet,
+  useGoogleMaps: config.useGoogleMaps
 });
 
-// Handle missing API key
-if (!config.googleMapsApiKey) {
-  console.warn('Google Maps API key is missing - attempting to use Leaflet instead');
-  // Don't set window.googleMapsDisabled here, we'll let the components decide based on config.useLeaflet
+// Dynamic library check
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', () => {
+    console.log("Window loaded, checking for mapping libraries:", {
+      googleMaps: typeof window.google?.maps !== 'undefined',
+      leaflet: typeof window.L !== 'undefined'
+    });
+  });
 }
 
 export default config;
