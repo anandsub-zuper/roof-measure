@@ -1,6 +1,5 @@
 # netlify.toml
 [build]
-
   command = "CI=false npm run build"
   publish = "build"
 
@@ -8,6 +7,7 @@
 [build.environment]
   # This tells create-react-app to ignore linting during build
   CI = "false"
+  ESLINT_NO_DEV_ERRORS = "true"
   # Set default API URL for fallback
   REACT_APP_API_URL = "https://roof-measure-5164a9a88417.herokuapp.com"
   # Increase Node memory limit to prevent build failures with large dependencies
@@ -18,7 +18,6 @@
   REACT_APP_ENABLE_LEAFLET = "true"
   # Do not disable Google Maps outright, let config logic decide
   REACT_APP_DISABLE_GOOGLE_MAPS = "false"
-  ESLINT_NO_DEV_ERRORS = "true"
 
 # Redirect API requests to your backend server
 [[redirects]]
