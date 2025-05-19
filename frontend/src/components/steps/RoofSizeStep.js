@@ -1,9 +1,8 @@
-// src/components/steps/RoofSizeStep.js with Leaflet integration
+// src/components/steps/RoofSizeStep.js
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Ruler, Camera, ChevronLeft, ChevronRight, Building, Info } from 'lucide-react';
 import { formatNumber } from '../../utils/formatters';
 import LeafletMapContainer from '../map/LeafletMapContainer';
-import LeafletMeasurementUtil from '../../utils/LeafletMeasurementUtil';
 import config from '../../config';
 import killSwitch from '../../killSwitch';
 import { debounce } from '../../utils/debounce';
@@ -19,8 +18,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [localRoofSize, setLocalRoofSize] = useState(formData.roofSize || '');
   const [showInfoTooltip, setShowInfoTooltip] = useState(false);
   const [manuallyEdited, setManuallyEdited] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const mapContainerRef = useRef(null);
   const prevSizeRef = useRef(formData.roofSize);
+  const loadingTimerRef = useRef(null);
+  
+  // Increase the map loading timeout
+  const MAP_LOADING_TIMEOUT = 30000; // 30 seconds instead of 15
   
   // Calculate estimated roof size based on property data (as a reference point)
   const estimatedSizeFromProperty = useMemo(() => {
@@ -82,6 +86,19 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
 
   // Check if map should be disabled
   useEffect(() => {
+    // Log the current configuration for debugging
+    console.log("Map configuration:", {
+      googleMapsDisabled: window.googleMapsDisabled,
+      killSwitchMaps: killSwitch.googleMaps,
+      hasGoogleMapsApiKey: !!config.googleMapsApiKey,
+      useLeaflet: config.useLeaflet,
+      environmentStatus: {
+        leafletLoaded: typeof L !== 'undefined',
+        googleMapsLoaded: typeof google !== 'undefined' && typeof google.maps !== 'undefined',
+        windowEnv: window.ENV
+      }
+    });
+    
     // Check for the flag set in config.js
     if (window.googleMapsDisabled || (killSwitch && killSwitch.googleMaps)) {
       console.log("Maps disabled, skipping map view");
@@ -95,7 +112,18 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       }
     }
     
-    // Fallback timeout - if loading doesn't complete in 15 seconds, force skip
+    // Simulate loading progress
+    loadingTimerRef.current = setInterval(() => {
+      setLoadingProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(loadingTimerRef.current);
+          return prev;
+        }
+        return prev + 10;
+      });
+    }, MAP_LOADING_TIMEOUT / 10);
+    
+    // Fallback timeout - if loading doesn't complete in 30 seconds, force skip
     const timeoutId = setTimeout(() => {
       if (loading) {
         console.log("Map loading timeout reached, skipping map");
@@ -108,9 +136,14 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           updateFormData('roofSize', 3000);
         }
       }
-    }, 15000);
+    }, MAP_LOADING_TIMEOUT);
     
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+      if (loadingTimerRef.current) {
+        clearInterval(loadingTimerRef.current);
+      }
+    };
   }, [formData.roofSize, loading, updateFormData]);
 
   // Sync local state with form data
@@ -125,12 +158,20 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const handleMapReady = useCallback(() => {
     console.log("Map ready event received");
     setLoading(false);
+    setLoadingProgress(100);
+    if (loadingTimerRef.current) {
+      clearInterval(loadingTimerRef.current);
+    }
   }, []);
 
   const handleMapError = useCallback((errorMessage) => {
     console.error("Map error:", errorMessage);
     setError(errorMessage);
     setLoading(false);
+    setLoadingProgress(100);
+    if (loadingTimerRef.current) {
+      clearInterval(loadingTimerRef.current);
+    }
     
     // If we get a map error, set a reasonable default roof size if none exists
     if (!formData.roofSize) {
@@ -281,6 +322,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
     
     setLoading(false);
+    setLoadingProgress(100);
+    if (loadingTimerRef.current) {
+      clearInterval(loadingTimerRef.current);
+    }
   }, [formData.roofSize, updateFormData]);
 
   // Display info about the analysis method
@@ -304,17 +349,18 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       estimatedFromProperty: estimatedSizeFromProperty,
       roofShape: formData.roofShape,
       roofPitch: formData.roofPitch,
-      analysisMethod: formData.roofAnalysisMethod
+      analysisMethod: formData.roofAnalysisMethod,
+      environmentStatus: {
+        leafletLoaded: typeof L !== 'undefined',
+        googleMapsLoaded: typeof google !== 'undefined' && typeof google.maps !== 'undefined',
+        windowEnv: window.ENV,
+        config: config,
+        killSwitch: killSwitch
+      }
     });
     
     if (formData.roofPolygon) {
       console.log("Roof polygon:", formData.roofPolygon);
-      const area = LeafletMeasurementUtil.calculateRoofArea(
-        formData.roofPolygon,
-        formData.roofPitch || 'moderate',
-        formData.roofShape || 'simple'
-      );
-      console.log("Calculated roof area:", area);
     }
   }, [mapDisabled, skipMap, formData.roofSize, formData.initialRoofSize,
       formData.roofPolygon, hasPropertyData, propertyType, buildingSize, stories,
@@ -414,15 +460,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
       )}
       
-      {/* Debug button - only in development */}
-      {process.env.NODE_ENV === 'development' && (
-        <button 
-          onClick={debugEnvironment}
-          className="mb-2 text-xs text-gray-400 hover:text-gray-600"
-        >
-          Debug Environment
-        </button>
-      )}
+      {/* Debug button - visible in all environments for troubleshooting */}
+      <button 
+        onClick={debugEnvironment}
+        className="mb-2 text-xs text-gray-400 hover:text-gray-600"
+      >
+        Debug Environment
+      </button>
       
       {/* Map Container with Satellite View */}
       <div className="w-full h-64 bg-gray-200 rounded-lg mb-6 relative overflow-hidden">
@@ -434,6 +478,15 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-10 bg-white bg-opacity-70">
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Loading satellite imagery...</p>
+            
+            {/* Loading progress bar */}
+            <div className="w-3/4 h-2 bg-gray-200 rounded-full mt-3 mb-3">
+              <div 
+                className="h-full bg-primary-600 rounded-full" 
+                style={{ width: `${loadingProgress}%` }}
+              ></div>
+            </div>
+            
             <button 
               onClick={handleSkipMap} 
               className="mt-4 text-xs text-blue-500 hover:text-blue-700 underline"
@@ -449,6 +502,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Error: {error}</p>
             <p className="text-xs mt-1">Using estimated roof size</p>
+            <button 
+              onClick={debugEnvironment}
+              className="mt-4 text-xs text-blue-500 hover:text-blue-700 underline"
+            >
+              Show Debug Info
+            </button>
           </div>
         )}
       </div>
