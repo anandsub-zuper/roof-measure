@@ -10,10 +10,12 @@ import './App.css';
 
 function App() {
   useEffect(() => {
-    // Check for map API availability
+    // Check for map API availability - fix for ESLint 'google' is not defined
     window.mapApiStatus = {
-      leaflet: typeof L !== 'undefined',
-      googleMaps: typeof google !== 'undefined' && typeof google.maps !== 'undefined'
+      leaflet: typeof window.L !== 'undefined',
+      googleMaps: typeof window.google !== 'undefined' && 
+                 typeof window.google !== 'undefined' && 
+                 typeof window.google.maps !== 'undefined'
     };
     
     console.log('Map API availability:', window.mapApiStatus);
