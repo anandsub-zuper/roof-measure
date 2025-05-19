@@ -10,9 +10,6 @@ import polygonDebugTool from '../../utils/polygonDebugTool';
 import performanceMonitor from '../../utils/performance';
 import { logMeasurementDiscrepancy } from '../../utils/metricsLogger';
 
-// Feature flag for Leaflet integration (can be moved to config file later)
-const ENABLE_LEAFLET = true; // Set to true to enable Leaflet features
-
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const renderTime = performance.now();
   const [loading, setLoading] = useState(true);
@@ -23,11 +20,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const [showInfoTooltip, setShowInfoTooltip] = useState(false);
   const mapContainerRef = useRef(null);
   const prevSizeRef = useRef(formData.roofSize);
-  
-  // NEW: Leaflet integration states (only used when ENABLE_LEAFLET is true)
-  const [leafletArea, setLeafletArea] = useState(0);
-  const [leafletPolygon, setLeafletPolygon] = useState(true);
-  const [showLeaflet, setShowLeaflet] = useState(true);
   
   // Calculate estimated roof size based on property data (as a reference point)
   const estimatedSizeFromProperty = useMemo(() => {
@@ -74,28 +66,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     // Track component performance
     if (performanceMonitor && performanceMonitor.trackComponent) {
       performanceMonitor.trackComponent('RoofSizeStep', performance.now() - renderTime);
-    }
-    
-    // Initialize Leaflet data if enabled
-    if (ENABLE_LEAFLET && formData.roofPolygon) {
-      setLeafletPolygon(formData.roofPolygon);
-      
-      // Try to calculate area with Turf if available
-      if (window.turf) {
-        try {
-          const turfCoords = formData.roofPolygon.map(point => [point.lng, point.lat]);
-          if (turfCoords[0][0] !== turfCoords[turfCoords.length-1][0] || 
-              turfCoords[0][1] !== turfCoords[turfCoords.length-1][1]) {
-            turfCoords.push(turfCoords[0]);
-          }
-          const polygon = window.turf.polygon([turfCoords]);
-          const areaInSquareMeters = window.turf.area(polygon);
-          const areaInSquareFeet = Math.round(areaInSquareMeters * 10.7639);
-          setLeafletArea(areaInSquareFeet);
-        } catch (err) {
-          console.warn("Failed to calculate area with Turf:", err);
-        }
-      }
     }
   }, [formData.lat, formData.lng, formData.roofSize, formData.initialRoofSize, 
       formData.roofPolygon, formData.propertyData, renderTime, formData.roofPitch,
@@ -168,22 +138,9 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
   }, [formData.roofSize, updateFormData]);
 
-  // Handle polygon creation with improved logic for discrepancies
+  // FIXED: Handle polygon creation with improved logic to handle discrepancies
   const handlePolygonCreated = useCallback((polygon, area) => {
     console.log("Polygon created with area:", area, "Backend area:", formData.initialRoofSize);
-    
-    // If Leaflet is enabled, capture polygon coordinates for Leaflet
-    if (ENABLE_LEAFLET && polygon && polygon.getPath) {
-      const path = polygon.getPath();
-      const points = [];
-      for (let i = 0; i < path.getLength(); i++) {
-        points.push({
-          lat: path.getAt(i).lat(),
-          lng: path.getAt(i).lng()
-        });
-      }
-      setLeafletPolygon(points);
-    }
     
     // Always store the polygon-calculated area separately
     updateFormData('polygonArea', area);
@@ -304,26 +261,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     setShowInfoTooltip(prev => !prev);
   }, []);
 
-  // NEW: Toggle Leaflet measurement visibility
-  const handleToggleLeaflet = useCallback((value) => {
-    setShowLeaflet(value);
-    
-    // Optionally update the measurement when toggling
-    if (value && leafletArea) {
-      // Use Leaflet measurement if switching to it
-      if (!formData.roofSizeAuto) {
-        setLocalRoofSize(leafletArea);
-        debouncedUpdateRoofSize(leafletArea);
-      }
-    } else if (!value && formData.polygonArea) {
-      // Use Google measurement if switching to it
-      if (!formData.roofSizeAuto) {
-        setLocalRoofSize(formData.polygonArea);
-        debouncedUpdateRoofSize(formData.polygonArea);
-      }
-    }
-  }, [leafletArea, formData.polygonArea, formData.roofSizeAuto, debouncedUpdateRoofSize]);
-
   // Debug function for environment variables
   const debugEnvironment = useCallback(() => {
     console.log("Environment check:", {
@@ -342,11 +279,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
       estimatedFromProperty: estimatedSizeFromProperty,
       roofShape: formData.roofShape,
       roofPitch: formData.roofPitch,
-      analysisMethod: formData.roofAnalysisMethod,
-      // Leaflet info if enabled
-      leafletEnabled: ENABLE_LEAFLET,
-      leafletArea: leafletArea,
-      leafletPolygonPoints: leafletPolygon ? leafletPolygon.length : 0
+      analysisMethod: formData.roofAnalysisMethod
     });
     
     if (formData.roofPolygon) {
@@ -355,7 +288,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   }, [mapDisabled, skipMap, formData.roofSize, formData.initialRoofSize,
       formData.roofPolygon, hasPropertyData, propertyType, buildingSize, stories,
       estimatedSizeFromProperty, localRoofSize, formData.roofShape, formData.roofPitch,
-      formData.roofAnalysisMethod, leafletArea, leafletPolygon]);
+      formData.roofAnalysisMethod]);
 
   // Memoize coordinates for map
   const coordinates = useMemo(() => {
@@ -554,46 +487,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               </div>
             )}
           </div>
-        )}
-
-        {/* Leaflet integration - only shown if feature flag is enabled */}
-        {ENABLE_LEAFLET && (
-          <>
-            {/* Measurement Method Toggle */}
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-600">Measurement Method:</span>
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => handleToggleLeaflet(false)}
-                  className={`text-xs px-2 py-1 rounded ${!showLeaflet ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-                >
-                  Google Maps
-                </button>
-                <button
-                  onClick={() => handleToggleLeaflet(true)}
-                  className={`text-xs px-2 py-1 rounded ${showLeaflet ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-                >
-                  Leaflet + Turf
-                </button>
-              </div>
-            </div>
-
-            {/* Measurement Comparison - only shown if feature flag is enabled */}
-            <div className="w-full bg-gray-50 p-3 rounded-lg mb-4 text-sm">
-              <div className="flex justify-between">
-                <span>Google Maps area:</span>
-                <span>{formatNumber(formData.polygonArea || 0)} sq ft</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Leaflet + Turf area:</span>
-                <span>{formatNumber(leafletArea || 0)} sq ft</span>
-              </div>
-              <div className="flex justify-between font-medium text-primary-700">
-                <span>Selected area:</span>
-                <span>{formatNumber(localRoofSize || 0)} sq ft</span>
-              </div>
-            </div>
-          </>
         )}
 
         {/* Auto/Manual Toggle */}
