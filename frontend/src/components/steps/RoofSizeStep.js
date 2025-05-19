@@ -24,7 +24,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const loadingTimerRef = useRef(null);
   
   // Increase the map loading timeout
-  const MAP_LOADING_TIMEOUT = 30000; // 30 seconds
+  const MAP_LOADING_TIMEOUT = 60000; // 30 seconds
   
   // Calculate estimated roof size based on property data (as a reference point)
   const estimatedSizeFromProperty = useMemo(() => {
@@ -108,7 +108,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         }
         return prev + 10;
       });
-    }, MAP_LOADING_TIMEOUT / 10);
+    }, MAP_LOADING_TIMEOUT / 20);
     
     // Fallback timeout - if loading doesn't complete in 30 seconds, force skip
     const timeoutId = setTimeout(() => {
@@ -123,6 +123,13 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           updateFormData('roofSize', 3000);
         }
       }
+
+      console.log("Map initialization started with:", { 
+    googleMapsKey: config.googleMapsApiKey ? "Present" : "Missing",
+    leafletAvailable: typeof window.L !== 'undefined',
+    validCoordinates: hasValidCoordinates(),
+    killSwitchEnabled: killSwitch && killSwitch.googleMaps
+  });
     }, MAP_LOADING_TIMEOUT);
     
     return () => {
