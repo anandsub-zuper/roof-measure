@@ -100,61 +100,60 @@ const EnhancedGoogleMapContainer = forwardRef(({
   const validLng = parseFloat(lng);
   
   // Function to create accurate polygon based on roof size or provided coords
-  const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
-    console.log("Creating roof polygon with:", {
-      size,
-      hasProvidedPolygon: !!providedPolygon && Array.isArray(providedPolygon),
-      hasPropertyData: !!(currentPropertyData || propertyData)
-    });
-    
-    // If we have polygon coordinates from the backend, use them but fix scaling issues
-    if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
-      console.log("Using provided roof polygon coordinates");
-      
-      // Debug the original polygon
-      console.log("Original backend polygon:");
-      polygonDebugTool.debugPolygon(providedPolygon, size);
-      
-      // Use our debug tool to fix polygon scaling
-      const fixedPolygon = polygonDebugTool.fixPolygonScaling(providedPolygon, size);
-      
-      // Debug the fixed polygon
-      console.log("Fixed polygon:");
-      polygonDebugTool.debugPolygon(fixedPolygon, size);
-      
-      return fixedPolygon;
-    }
-    
-    // Use property data for better polygon generation (use passed data or component prop)
-    const dataToUse = currentPropertyData || propertyData;
-    
-    if (dataToUse) {
-      console.log("Using property data for enhanced polygon generation:", dataToUse.propertyType);
-      
-      // Generate property-specific polygon
-      const propertyPolygon = propertyPolygonGenerator.generatePropertyPolygon(
-        validLat, 
-        validLng, 
-        size, 
-        dataToUse
-      );
-      
-      // Debug the property-based polygon
-      polygonDebugTool.debugPolygon(propertyPolygon, size);
-      
-      return propertyPolygon;
-    }
-    
-    // Fallback to size-based polygon generation
-    console.log("Using size-based polygon generation");
-    const sizeBasedPolygon = propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
-    
-    // Debug the size-based polygon
-    polygonDebugTool.debugPolygon(sizeBasedPolygon, size);
-    
-    return sizeBasedPolygon;
-  };
+const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
+  console.log("Creating roof polygon with:", {
+    size,
+    hasProvidedPolygon: !!providedPolygon && Array.isArray(providedPolygon),
+    hasPropertyData: !!(currentPropertyData || propertyData)
+  });
   
+  // If we have polygon coordinates from the backend, use them but fix scaling issues
+  if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
+    console.log("Using provided roof polygon coordinates");
+    
+    // Debug the original polygon
+    console.log("Original backend polygon:");
+    polygonDebugTool.debugPolygon(providedPolygon, size);
+    
+    // Use our debug tool to fix polygon scaling
+    const fixedPolygon = polygonDebugTool.fixPolygonScaling(providedPolygon, size);
+    
+    // Debug the fixed polygon
+    console.log("Fixed polygon:");
+    polygonDebugTool.debugPolygon(fixedPolygon, size);
+    
+    return fixedPolygon;
+  }
+  
+  // Use property data for better polygon generation (use passed data or component prop)
+  const dataToUse = currentPropertyData || propertyData;
+  
+  if (dataToUse) {
+    console.log("Using property data for enhanced polygon generation:", dataToUse.propertyType);
+    
+    // Generate property-specific polygon
+    const propertyPolygon = propertyPolygonGenerator.generatePropertyPolygon(
+      validLat, 
+      validLng, 
+      size, 
+      dataToUse
+    );
+    
+    // Debug the property-based polygon
+    polygonDebugTool.debugPolygon(propertyPolygon, size);
+    
+    return propertyPolygon;
+  }
+  
+  // Fallback to size-based polygon generation
+  console.log("Using size-based polygon generation");
+  const sizeBasedPolygon = propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
+  
+  // Debug the size-based polygon
+  polygonDebugTool.debugPolygon(sizeBasedPolygon, size);
+  
+  return sizeBasedPolygon;
+};
   // Calculate polygon area in square feet
   const calculatePolygonArea = (polygon, currentPropertyData = null) => {
     // Use passed property data or the component prop
