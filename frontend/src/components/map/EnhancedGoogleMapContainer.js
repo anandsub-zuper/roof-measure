@@ -1,5 +1,4 @@
-// frontend/src/components/map/EnhancedGoogleMapContainer.js - Full updated version
-
+// frontend/src/components/map/EnhancedGoogleMapContainer.js
 import React, { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import config from '../../config';
 import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
@@ -99,61 +98,79 @@ const EnhancedGoogleMapContainer = forwardRef(({
   const validLat = parseFloat(lat);
   const validLng = parseFloat(lng);
   
-  // Function to create accurate polygon based on roof size or provided coords
-const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
-  console.log("Creating roof polygon with:", {
-    size,
-    hasProvidedPolygon: !!providedPolygon && Array.isArray(providedPolygon),
-    hasPropertyData: !!(currentPropertyData || propertyData)
-  });
+  // Helper function to calculate centroid of a polygon
+  const calculateCentroid = (polygonCoords) => {
+    let latSum = 0;
+    let lngSum = 0;
+    
+    polygonCoords.forEach(point => {
+      latSum += point.lat;
+      lngSum += point.lng;
+    });
+    
+    return {
+      lat: latSum / polygonCoords.length,
+      lng: lngSum / polygonCoords.length
+    };
+  };
   
-  // If we have polygon coordinates from the backend, use them but fix scaling issues
-  if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
-    console.log("Using provided roof polygon coordinates");
+  // CRITICAL FIX: Function to create accurate polygon based on roof size and center it correctly
+  const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, currentPropertyData = null) => {
+    console.log("Creating roof polygon with:", {
+      lat: validLat,
+      lng: validLng,
+      size,
+      hasProvidedPolygon: !!providedPolygon && Array.isArray(providedPolygon),
+      hasPropertyData: !!(currentPropertyData || propertyData)
+    });
     
-    // Debug the original polygon
-    console.log("Original backend polygon:");
-    polygonDebugTool.debugPolygon(providedPolygon, size);
+    // If we have polygon coordinates from the backend, use them but fix scaling issues
+    if (providedPolygon && Array.isArray(providedPolygon) && providedPolygon.length >= 3) {
+      console.log("Using provided roof polygon coordinates");
+      
+      // Fix 1: Center the provided polygon on the exact marker location
+      const providedCentroid = calculateCentroid(providedPolygon);
+      
+      // Calculate offset from current marker position
+      const latOffset = validLat - providedCentroid.lat;
+      const lngOffset = validLng - providedCentroid.lng;
+      
+      // Reposition polygon to be centered on marker
+      const repositionedPolygon = providedPolygon.map(point => ({
+        lat: point.lat + latOffset,
+        lng: point.lng + lngOffset
+      }));
+      
+      // Fix 2: Now scale the repositioned polygon to match the desired size
+      const fixedPolygon = polygonDebugTool.fixPolygonScaling(repositionedPolygon, size);
+      
+      return fixedPolygon;
+    }
     
-    // Use our debug tool to fix polygon scaling
-    const fixedPolygon = polygonDebugTool.fixPolygonScaling(providedPolygon, size);
+    // Use property data for better polygon generation (use passed data or component prop)
+    const dataToUse = currentPropertyData || propertyData;
     
-    // Debug the fixed polygon
-    console.log("Fixed polygon:");
-    polygonDebugTool.debugPolygon(fixedPolygon, size);
+    if (dataToUse) {
+      console.log("Using property data for enhanced polygon generation:", dataToUse.propertyType);
+      
+      // Generate property-specific polygon directly centered on marker
+      const propertyPolygon = propertyPolygonGenerator.generatePropertyPolygon(
+        validLat, 
+        validLng, 
+        size, 
+        dataToUse
+      );
+      
+      return propertyPolygon;
+    }
     
-    return fixedPolygon;
-  }
+    // Fallback to size-based polygon generation centered on marker
+    console.log("Using size-based polygon generation");
+    const sizeBasedPolygon = propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
+    
+    return sizeBasedPolygon;
+  };
   
-  // Use property data for better polygon generation (use passed data or component prop)
-  const dataToUse = currentPropertyData || propertyData;
-  
-  if (dataToUse) {
-    console.log("Using property data for enhanced polygon generation:", dataToUse.propertyType);
-    
-    // Generate property-specific polygon
-    const propertyPolygon = propertyPolygonGenerator.generatePropertyPolygon(
-      validLat, 
-      validLng, 
-      size, 
-      dataToUse
-    );
-    
-    // Debug the property-based polygon
-    polygonDebugTool.debugPolygon(propertyPolygon, size);
-    
-    return propertyPolygon;
-  }
-  
-  // Fallback to size-based polygon generation
-  console.log("Using size-based polygon generation");
-  const sizeBasedPolygon = propertyPolygonGenerator.generateSizeBasedPolygon(validLat, validLng, size);
-  
-  // Debug the size-based polygon
-  polygonDebugTool.debugPolygon(sizeBasedPolygon, size);
-  
-  return sizeBasedPolygon;
-};
   // Calculate polygon area in square feet
   const calculatePolygonArea = (polygon, currentPropertyData = null) => {
     // Use passed property data or the component prop
@@ -220,6 +237,44 @@ const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, cur
       console.error("Error calculating polygon area:", error);
       return roofSize || 2500; // Return the provided roof size as fallback
     }
+  };
+  
+  // Update polygon when roof size changes
+  const updatePolygonForSize = (size) => {
+    if (!mapInstance || !validLat || !validLng) return;
+    
+    // Remove existing polygon
+    if (polygonInstance) {
+      polygonInstance.setMap(null);
+    }
+    
+    // Create new polygon with updated size
+    const polygonCoords = createRoofPolygon(validLat, validLng, size, null, propertyData);
+    
+    // Create the polygon on the map
+    const polygon = new window.google.maps.Polygon({
+      paths: polygonCoords,
+      strokeColor: '#2563EB',
+      strokeOpacity: 1.0,
+      strokeWeight: 3,
+      fillColor: '#2563EB',
+      fillOpacity: 0.4,
+      map: mapInstance
+    });
+    setPolygonInstance(polygon);
+    
+    // Calculate area from the polygon
+    const area = calculatePolygonArea(polygonCoords, propertyData);
+    
+    // Fit map bounds to show the polygon
+    const bounds = new window.google.maps.LatLngBounds();
+    polygonCoords.forEach(coord => {
+      bounds.extend(coord);
+    });
+    mapInstance.fitBounds(bounds);
+    
+    // Notify parent
+    onPolygonCreated && onPolygonCreated(polygon, area);
   };
   
   // Initialize map when component mounts
@@ -363,7 +418,7 @@ const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, cur
             console.groupEnd();
           }
           
-          // Create polygon using roof coordinates or estimate
+          // CRITICAL FIX: Create polygon precisely centered on the marker position
           const polygonCoords = createRoofPolygon(validLat, validLng, roofSize, roofPolygon);
           
           // Debug the final polygon coordinates
@@ -463,6 +518,14 @@ const createRoofPolygon = (validLat, validLng, size, providedPolygon = null, cur
       return () => {};
     }
   }, [lat, lng, address, roofSize, roofPolygon, onMapReady, onMapError, onPolygonCreated]);
+
+  // Watch for roof size changes and update polygon accordingly
+  useEffect(() => {
+    if (mapInstance && polygonInstance && roofSize) {
+      console.log("Roof size changed, updating polygon:", roofSize);
+      updatePolygonForSize(roofSize);
+    }
+  }, [roofSize, mapInstance]);
 
   // Update polygon when property data changes
   useEffect(() => {
