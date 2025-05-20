@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
 import killSwitch from '../killSwitch';
-import performanceMonitor from '../utils/performance';
 import propertyDataService from '../services/propertyDataService';
 import propertyPolygonGenerator from '../utils/propertyPolygonGenerator';
 
