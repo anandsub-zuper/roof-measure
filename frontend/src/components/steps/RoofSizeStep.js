@@ -9,7 +9,7 @@ import { debounce } from '../../utils/debounce';
 import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
-  const renderTime = performance.now();
+  // Removed performance monitoring references
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [skipMap, setSkipMap] = useState(false);
