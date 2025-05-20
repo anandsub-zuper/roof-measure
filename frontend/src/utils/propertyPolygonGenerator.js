@@ -1,4 +1,4 @@
-// src/utils/propertyPolygonGenerator.js - Fixed polygon scaling
+// src/utils/propertyPolygonGenerator.js - Updated with improved measurement
 /**
  * Property-specific polygon generation utility
  * Creates accurate roof polygons based on property metadata
@@ -16,7 +16,7 @@ export const generatePropertyPolygon = (lat, lng, size, propertyData = null) => 
   // Always validate inputs first
   if (!lat || !lng || !size) {
     console.warn("Invalid inputs for polygon generation");
-    return generateSimplePolygon(lat, lng, 2500, 0.85); // FIXED: Using larger scale factor
+    return generateSimplePolygon(lat, lng, 2500, 0.85); // Using larger scale factor
   }
   
   // If we have property data, use it for better polygon generation
@@ -58,7 +58,6 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
   // Calculate basic size metrics
   const sqMeters = size * 0.092903;
   
-  // FIXED: Revert to larger scale factors for proper visual representation
   // Define building-specific scaling factors
   let scaleFactor = 0.85; // Increased from 0.4
   let aspectRatio = 1.5; // Default
@@ -88,7 +87,7 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
   
   // Adjust for multi-story buildings
   if (stories > 1) {
-    // FIXED: For multi-story, scale factor should be larger to account for the full footprint
+    // For multi-story, scale factor should be larger to account for the full footprint
     // A 2-story building should have a footprint ~50% of the total area
     const adjustedSize = size / stories;
     scaleFactor *= 0.9 + (0.2 * stories); // Increase scale factor for multi-story buildings
@@ -109,7 +108,7 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
     const lngOffset = (width / 2) / feetPerDegreeLng;
     
     // Position adjustment - different for various buildings
-    const posAdjustment = 0.15;
+    const posAdjustment = 0.25; // Increased from 0.15 for better positioning
     const adjustedLat = lat + (latOffset * posAdjustment);
     
     // Return simple polygon for multi-story buildings
@@ -137,7 +136,7 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
   const lngOffset = (width / 2) / feetPerDegreeLng;
   
   // Position adjustment - different for various buildings
-  const posAdjustment = 0.15;
+  const posAdjustment = 0.25; // Increased from 0.15 for better positioning
   const adjustedLat = lat + (latOffset * posAdjustment);
   
   // Create complex polygons for certain building types
@@ -227,7 +226,7 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
   // Size to square meters
   const sqMeters = size * 0.092903;
   
-  // FIXED: Apply a larger scale factor for visual representation
+  // Apply a larger scale factor for visual representation
   let scaleFactor = 0.85; // Increased from 0.4
   
   // Adjust scaling based on size categories 
@@ -264,8 +263,8 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
   const latOffset = (length / 2) / feetPerDegreeLat;
   const lngOffset = (width / 2) / feetPerDegreeLng;
   
-  // Position adjustment
-  const posAdjustment = 0.15;
+  // Position adjustment - increased for better positioning
+  const posAdjustment = 0.25; 
   const adjustedLat = lat + (latOffset * posAdjustment);
   
   // Create rectangle
@@ -307,8 +306,8 @@ export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 0.85)
   const latOffset = (length / 2) / feetPerDegreeLat;
   const lngOffset = (width / 2) / feetPerDegreeLng;
   
-  // Position adjustment
-  const adjustedLat = lat + (latOffset * 0.15);
+  // Position adjustment - increased for better positioning
+  const adjustedLat = lat + (latOffset * 0.25);
   
   // Create rectangle
   return [
@@ -320,7 +319,7 @@ export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 0.85)
 };
 
 /**
- * Calculate the actual roof size based on building characteristics
+ * Calculate the actual roof size based on building characteristics - IMPROVED
  * @param {number} buildingSize - Building square footage
  * @param {Object} propertyData - Property data
  * @returns {number} - Estimated actual roof size
@@ -328,38 +327,71 @@ export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 0.85)
 export const calculateRoofSizeFromBuildingSize = (buildingSize, propertyData) => {
   if (!buildingSize) return null;
   
-  let stories = 1;
-  let roofType = 'unknown';
+  // Extract key property data
+  const stories = propertyData?.stories || 1;
+  const propertyType = (propertyData?.propertyType || '').toLowerCase();
+  const buildingSizeNum = parseFloat(buildingSize);
   
-  if (propertyData) {
-    stories = propertyData.stories || 1;
-    roofType = (propertyData.roofType || 'unknown').toLowerCase();
+  // Calculate the ground floor footprint
+  const footprint = Math.round(buildingSizeNum / stories);
+  
+  // Define base pitch factors based on building type
+  let pitchFactor = 1.2; // Default moderate pitch
+  let complexityFactor = 1.0; // Default complexity
+  let overhangFactor = 1.05; // Default overhang factor (5%)
+  
+  // Adjust factors based on property type
+  if (propertyType.includes('single') && propertyType.includes('family')) {
+    // Single family home factors - adjust based on size and stories
+    if (stories === 2) {
+      pitchFactor = 1.25; // Two-story homes often have steeper main roofs
+      overhangFactor = 1.08; // More substantial overhangs (8%)
+    } else {
+      pitchFactor = 1.2; // One-story homes have typical pitch
+    }
+    
+    // Adjust for building size (larger homes have more complex roofs)
+    if (buildingSizeNum >= 2500) {
+      complexityFactor = 1.1; // 10% extra for large homes with complex roof lines
+    } else if (buildingSizeNum >= 1800) {
+      complexityFactor = 1.07; // 7% extra for medium-large homes
+    } else {
+      complexityFactor = 1.05; // 5% extra for smaller homes
+    }
+  } else if (propertyType.includes('condo') || propertyType.includes('apartment')) {
+    // Condos and apartments often have flatter roofs
+    pitchFactor = 1.1;
+    complexityFactor = 1.0;
+    overhangFactor = 1.03; // 3% for overhangs
+  } else if (propertyType.includes('town')) {
+    // Townhomes - adjust based on size
+    pitchFactor = 1.2;
+    complexityFactor = 1.03;
+    overhangFactor = 1.05;
+  } else if (propertyType.includes('commercial')) {
+    // Commercial buildings often have flatter roofs
+    pitchFactor = 1.08;
+    complexityFactor = 1.0;
+    overhangFactor = 1.02;
   }
   
-  // Adjust building size by stories to get footprint
-  let footprint = buildingSize / stories;
+  // Calculate total factor
+  const totalFactor = pitchFactor * complexityFactor * overhangFactor;
   
-  // Include some overlap for multi-story buildings
-  if (stories > 1) {
-    // Add 5% per additional story for stairwells, multi-level spaces, etc.
-    footprint *= (1 + ((stories - 1) * 0.05));
+  // Apply total factor to footprint
+  const calculatedRoofSize = Math.round(footprint * totalFactor);
+  
+  // For the given example (2,990 sq ft, 2-story building):
+  // - Footprint would be about 1,495 sq ft
+  // - For single-family: ~1,495 * 1.25 * 1.1 * 1.08 = ~2,234 sq ft
+  // - For other types: Will adjust based on the above factors
+  
+  // Ensure result is within reasonable bounds (never less than footprint)
+  if (calculatedRoofSize < footprint) {
+    return footprint;
   }
   
-  // Adjust based on roof type
-  const roofFactors = {
-    'flat': 1.05,      // 5% more than footprint for drainage
-    'gable': 1.15,     // 15% more than footprint due to pitch
-    'hip': 1.18,       // 18% more than footprint due to multiple slopes
-    'mansard': 1.35,   // 35% more due to steep double slopes
-    'gambrel': 1.20,   // 20% more for barn-style
-    'shed': 1.08,      // 8% more for single slope
-    'unknown': 1.12    // Default assumed pitch adjustment
-  };
-  
-  const roofFactor = roofFactors[roofType] || roofFactors.unknown;
-  
-  // Calculate final roof size
-  return Math.round(footprint * roofFactor);
+  return calculatedRoofSize;
 };
 
 /**
