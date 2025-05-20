@@ -1,6 +1,4 @@
-// Add this utility to debug polygons in your RoofAI project
-// Create a new file: frontend/src/utils/polygonDebugTool.js
-
+// src/utils/polygonDebugTool.js
 /**
  * Debugging tools for roof polygon issues
  * This utility allows you to troubleshoot polygon scaling and area calculation
@@ -65,7 +63,7 @@ export const debugPolygon = (polygonCoords, expectedSize) => {
 };
 
 /**
- * Fix polygon scaling issues
+ * Fix polygon scaling issues - UPDATED
  * @param {Array} polygonCoords - The polygon coordinates
  * @param {number} targetSize - Target roof size in square feet
  * @returns {Array} - Fixed polygon coordinates
@@ -110,44 +108,6 @@ export const fixPolygonScaling = (polygonCoords, targetSize) => {
     console.error("Error fixing polygon scaling:", error);
     return polygonCoords;
   }
-};
-
-// Helper calculation functions remain the same
-const calculateAreaMercator = (polygonCoords) => {
-  const earthRadius = 6378137; // meters
-  
-  // Convert lat/lng to meters with Mercator projection
-  const pointsInMeters = polygonCoords.map(point => {
-    const x = point.lng * (Math.PI / 180) * earthRadius;
-    const y = Math.log(Math.tan((Math.PI / 4) + (point.lat * (Math.PI / 180) / 2))) * earthRadius;
-    return { x, y };
-  });
-  
-  // Apply shoelace formula
-  let area = 0;
-  for (let i = 0; i < pointsInMeters.length; i++) {
-    const j = (i + 1) % pointsInMeters.length;
-    area += pointsInMeters[i].x * pointsInMeters[j].y;
-    area -= pointsInMeters[j].x * pointsInMeters[i].y;
-  }
-  
-  // Convert square meters to square feet
-  return Math.abs(area / 2) * 10.7639;
-};
-
-const calculateCentroid = (polygonCoords) => {
-  let latSum = 0;
-  let lngSum = 0;
-  
-  polygonCoords.forEach(point => {
-    latSum += point.lat;
-    lngSum += point.lng;
-  });
-  
-  return {
-    lat: latSum / polygonCoords.length,
-    lng: lngSum / polygonCoords.length
-  };
 };
 
 /**
