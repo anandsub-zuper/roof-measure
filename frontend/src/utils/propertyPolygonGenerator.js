@@ -1,4 +1,4 @@
-// src/utils/propertyPolygonGenerator.js - Updated with improved measurement
+// src/utils/propertyPolygonGenerator.js - Updated with fixed positioning
 /**
  * Property-specific polygon generation utility
  * Creates accurate roof polygons based on property metadata
@@ -107,9 +107,8 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
     const latOffset = (length / 2) / feetPerDegreeLat;
     const lngOffset = (width / 2) / feetPerDegreeLng;
     
-    // Position adjustment - different for various buildings
-    const posAdjustment = 0.25; // Increased from 0.15 for better positioning
-    const adjustedLat = lat + (latOffset * posAdjustment);
+    // FIX: Set position adjustment to 0 to center the polygon on the actual coordinates
+    const adjustedLat = lat;
     
     // Return simple polygon for multi-story buildings
     return [
@@ -135,9 +134,8 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
   const latOffset = (length / 2) / feetPerDegreeLat;
   const lngOffset = (width / 2) / feetPerDegreeLng;
   
-  // Position adjustment - different for various buildings
-  const posAdjustment = 0.25; // Increased from 0.15 for better positioning
-  const adjustedLat = lat + (latOffset * posAdjustment);
+  // FIX: Set position adjustment to 0 to center the polygon on the actual coordinates
+  const adjustedLat = lat;
   
   // Create complex polygons for certain building types
   if ((typeInfo.isMultiFamily || typeInfo.isApartment) && size > 3000) {
@@ -263,9 +261,8 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
   const latOffset = (length / 2) / feetPerDegreeLat;
   const lngOffset = (width / 2) / feetPerDegreeLng;
   
-  // Position adjustment - increased for better positioning
-  const posAdjustment = 0.25; 
-  const adjustedLat = lat + (latOffset * posAdjustment);
+  // FIX: Set position adjustment to 0 to center the polygon on the actual coordinates
+  const adjustedLat = lat;
   
   // Create rectangle
   return [
@@ -306,8 +303,8 @@ export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 0.85)
   const latOffset = (length / 2) / feetPerDegreeLat;
   const lngOffset = (width / 2) / feetPerDegreeLng;
   
-  // Position adjustment - increased for better positioning
-  const adjustedLat = lat + (latOffset * 0.25);
+  // FIX: Set position adjustment to 0 to center the polygon on the actual coordinates
+  const adjustedLat = lat;
   
   // Create rectangle
   return [
@@ -380,11 +377,6 @@ export const calculateRoofSizeFromBuildingSize = (buildingSize, propertyData) =>
   
   // Apply total factor to footprint
   const calculatedRoofSize = Math.round(footprint * totalFactor);
-  
-  // For the given example (2,990 sq ft, 2-story building):
-  // - Footprint would be about 1,495 sq ft
-  // - For single-family: ~1,495 * 1.25 * 1.1 * 1.08 = ~2,234 sq ft
-  // - For other types: Will adjust based on the above factors
   
   // Ensure result is within reasonable bounds (never less than footprint)
   if (calculatedRoofSize < footprint) {
