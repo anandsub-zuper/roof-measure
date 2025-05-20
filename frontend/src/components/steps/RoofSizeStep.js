@@ -6,9 +6,7 @@ import EnhancedGoogleMapContainer from '../map/EnhancedGoogleMapContainer';
 import config from '../../config';
 import killSwitch from '../../killSwitch';
 import { debounce } from '../../utils/debounce';
-import polygonDebugTool from '../../utils/polygonDebugTool';
-import performanceMonitor from '../../utils/performance';
-import { logMeasurementDiscrepancy } from '../../utils/metricsLogger';
+import propertyPolygonGenerator from '../../utils/propertyPolygonGenerator';
 
 const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const renderTime = performance.now();
@@ -21,29 +19,12 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
   const mapContainerRef = useRef(null);
   const prevSizeRef = useRef(formData.roofSize);
   
-  // Calculate estimated roof size based on property data (as a reference point)
-  const estimatedSizeFromProperty = useMemo(() => {
-    if (formData.propertyData && formData.propertyData.buildingSize && formData.propertyData.stories) {
-      const footprint = formData.propertyData.buildingSize / formData.propertyData.stories;
-      
-      // Apply pitch factor based on estimated pitch or default
-      const pitchFactor = {
-        'flat': 1.05,
-        'low': 1.15,
-        'moderate': 1.3,
-        'steep': 1.5
-      }[formData.roofPitch || 'moderate'] || 1.3;
-      
-      return Math.round(footprint * pitchFactor);
-    }
-    return null;
-  }, [formData.propertyData, formData.roofPitch]);
-  
-  // Extract property data for display
+  // Display property information and provide a better sizing description
   const hasPropertyData = !!formData.propertyData;
   const propertyType = formData.propertyData?.propertyType || 'Unknown';
   const buildingSize = formData.propertyData?.buildingSize || null;
   const stories = formData.propertyData?.stories || null;
+  const sizingMethod = formData.sizingMethod || 'unknown';
   
   // Debug logging
   useEffect(() => {
@@ -58,18 +39,10 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         buildingSize: formData.propertyData.buildingSize,
         stories: formData.propertyData.stories
       } : "None",
-      roofPitch: formData.roofPitch,
-      roofShape: formData.roofShape,
-      roofAnalysisMethod: formData.roofAnalysisMethod
+      sizingMethod: formData.sizingMethod || "unknown"
     });
-    
-    // Track component performance
-    if (performanceMonitor && performanceMonitor.trackComponent) {
-      performanceMonitor.trackComponent('RoofSizeStep', performance.now() - renderTime);
-    }
   }, [formData.lat, formData.lng, formData.roofSize, formData.initialRoofSize, 
-      formData.roofPolygon, formData.propertyData, renderTime, formData.roofPitch,
-      formData.roofShape, formData.roofAnalysisMethod]);
+      formData.roofPolygon, formData.propertyData, formData.sizingMethod]);
 
   // Create a debounced update function for roof size
   const debouncedUpdateRoofSize = useCallback(
@@ -131,62 +104,49 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     setError(errorMessage);
     setLoading(false);
     
-    // If we get a map error, set a reasonable default roof size if none exists
-    if (!formData.roofSize) {
-      setLocalRoofSize(3000);
-      updateFormData('roofSize', 3000);
-    }
-  }, [formData.roofSize, updateFormData]);
-
-  // FIXED: Handle polygon creation with improved logic to handle discrepancies
-  const handlePolygonCreated = useCallback((polygon, area) => {
-    console.log("Polygon created with area:", area, "Backend area:", formData.initialRoofSize);
-    
-    // Always store the polygon-calculated area separately
-    updateFormData('polygonArea', area);
-    
-    // Compare with backend calculation if available
-    const backendSize = formData.initialRoofSize;
-    
-    if (backendSize) {
-      const polygonSize = area || 0;
-      const sizeRatio = polygonSize / backendSize;
+    // If we get a map error, use property-based calculation
+    if (formData.propertyData && formData.propertyData.buildingSize) {
+      const calculatedSize = propertyPolygonGenerator.calculateRoofSizeFromBuildingSize(
+        formData.propertyData.buildingSize,
+        formData.propertyData
+      );
       
-      // Log the discrepancy for monitoring
-      if (formData.address && window.logMeasurementDiscrepancy) {
-        logMeasurementDiscrepancy(backendSize, polygonSize, formData.address);
-      }
-      
-      // Significant discrepancy - use backend value as it's more reliable
-      if (!area || sizeRatio < 0.7 || sizeRatio > 1.3) {
-        console.log("Large discrepancy detected, using backend size:", backendSize);
-        updateFormData('roofSize', backendSize);
-        setLocalRoofSize(backendSize);
-        updateFormData('sizingMethod', 'backend_override');
-        updateFormData('sizingNotes', `Polygon calculation (${area} sq ft) differed from backend (${backendSize} sq ft)`);
+      if (calculatedSize) {
+        console.log("Using property-based calculation after map error:", calculatedSize);
+        updateFormData('roofSize', calculatedSize);
+        setLocalRoofSize(calculatedSize);
         return;
       }
     }
     
-    // Use polygon area when it's reasonable or we don't have backend data
-    if (area && area > 500 && area < 10000) {
-      console.log("Using polygon-calculated area:", area);
-      updateFormData('roofSize', area);
-      setLocalRoofSize(area);
-      updateFormData('sizingMethod', 'polygon_calculated');
-    } else if (estimatedSizeFromProperty) {
-      // Fall back to property-based estimation
-      console.log("Using property-based estimation:", estimatedSizeFromProperty);
-      updateFormData('roofSize', estimatedSizeFromProperty);
-      setLocalRoofSize(estimatedSizeFromProperty);
-      updateFormData('sizingMethod', 'property_estimated');
-    } else if (formData.initialRoofSize) {
-      // Last resort, use initial backend value
-      updateFormData('roofSize', formData.initialRoofSize);
-      setLocalRoofSize(formData.initialRoofSize);
-      updateFormData('sizingMethod', 'backend_initial');
+    // Fallback if property calculation fails
+    if (!formData.roofSize) {
+      setLocalRoofSize(3000);
+      updateFormData('roofSize', 3000);
     }
-  }, [formData.initialRoofSize, formData.address, estimatedSizeFromProperty, updateFormData]);
+  }, [formData.propertyData, formData.roofSize, updateFormData]);
+
+  // Modified polygon handler that doesn't change the existing roof size
+  // This keeps the more accurate property-based calculation
+  const handlePolygonCreated = useCallback((polygon, area) => {
+    console.log("Polygon visualization created with area:", area);
+    
+    // Store the polygon area for reference but don't overwrite roofSize
+    updateFormData('polygonArea', area);
+    
+    // Only update if we don't already have a property-based calculation
+    if (!formData.sizingMethod || formData.sizingMethod === 'unknown') {
+      if (area && area > 500 && area < 10000) {
+        updateFormData('roofSize', area);
+        setLocalRoofSize(area);
+        updateFormData('sizingMethod', 'polygon_measurement');
+      } else if (formData.initialRoofSize) {
+        // Use initial backend value as fallback
+        updateFormData('roofSize', formData.initialRoofSize);
+        setLocalRoofSize(formData.initialRoofSize);
+      }
+    }
+  }, [formData.initialRoofSize, formData.sizingMethod, updateFormData]);
 
   // Toggle automatic/manual size
   const handleToggleAutoSize = useCallback((e) => {
@@ -195,27 +155,35 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     
     // Restore roof size based on different sources when returning to auto
     if (isAuto) {
-      // Priority: 
-      // 1. Use backend-calculated area if available
-      // 2. Use polygon-calculated area if valid
-      // 3. Use property-based calculation if available
-      // 4. Fall back to initial size
+      // Priority order for automatic size
+      if (formData.propertyData && formData.propertyData.buildingSize) {
+        // Use property-based calculation (most accurate)
+        const calculatedSize = propertyPolygonGenerator.calculateRoofSizeFromBuildingSize(
+          formData.propertyData.buildingSize,
+          formData.propertyData
+        );
+        
+        if (calculatedSize) {
+          console.log("Restoring property-based roof size calculation");
+          updateFormData('roofSize', calculatedSize);
+          setLocalRoofSize(calculatedSize);
+          updateFormData('sizingMethod', 'property_calculation');
+          return;
+        }
+      }
       
+      // Fallback options if property calculation not available
       if (formData.initialRoofSize) {
-        console.log("Restoring backend-calculated roof size");
+        console.log("Restoring initial roof size");
         updateFormData('roofSize', formData.initialRoofSize);
         setLocalRoofSize(formData.initialRoofSize);
       } else if (formData.polygonArea && formData.polygonArea > 500) {
         console.log("Restoring polygon-calculated area");
         updateFormData('roofSize', formData.polygonArea);
         setLocalRoofSize(formData.polygonArea);
-      } else if (estimatedSizeFromProperty) {
-        console.log("Restoring property-based estimation");
-        updateFormData('roofSize', estimatedSizeFromProperty);
-        setLocalRoofSize(estimatedSizeFromProperty);
       }
     }
-  }, [formData.polygonArea, formData.initialRoofSize, estimatedSizeFromProperty, updateFormData]);
+  }, [formData.propertyData, formData.initialRoofSize, formData.polygonArea, updateFormData]);
 
   // Handle manual roof size input
   const handleManualSizeChange = useCallback((e) => {
@@ -247,48 +215,35 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     console.log("User manually skipped map view");
     setSkipMap(true);
     
-    // Set a default roof size if none exists
+    // Use property-based calculation if available
+    if (formData.propertyData && formData.propertyData.buildingSize) {
+      const calculatedSize = propertyPolygonGenerator.calculateRoofSizeFromBuildingSize(
+        formData.propertyData.buildingSize,
+        formData.propertyData
+      );
+      
+      if (calculatedSize) {
+        updateFormData('roofSize', calculatedSize);
+        setLocalRoofSize(calculatedSize);
+        updateFormData('sizingMethod', 'property_calculation');
+        setLoading(false);
+        return;
+      }
+    }
+    
+    // Set a default roof size if none exists and property calculation failed
     if (!formData.roofSize) {
       setLocalRoofSize(3000);
       updateFormData('roofSize', 3000);
     }
     
     setLoading(false);
-  }, [formData.roofSize, updateFormData]);
+  }, [formData.propertyData, formData.roofSize, updateFormData]);
 
   // Display info about the analysis method
   const handleToggleInfoTooltip = useCallback(() => {
     setShowInfoTooltip(prev => !prev);
   }, []);
-
-  // Debug function for environment variables
-  const debugEnvironment = useCallback(() => {
-    console.log("Environment check:", {
-      googleMapsKey: config.googleMapsApiKey ? "Present (first 4 chars: " + config.googleMapsApiKey.substring(0,4) + "...)" : "Missing",
-      apiUrl: config.apiUrl,
-      mapDisabled: mapDisabled,
-      skipMap: skipMap,
-      formDataRoofSize: formData.roofSize,
-      initialRoofSize: formData.initialRoofSize,
-      localRoofSize: localRoofSize,
-      hasRoofPolygon: !!formData.roofPolygon,
-      hasPropertyData: hasPropertyData,
-      propertyType: propertyType,
-      buildingSize: buildingSize,
-      stories: stories,
-      estimatedFromProperty: estimatedSizeFromProperty,
-      roofShape: formData.roofShape,
-      roofPitch: formData.roofPitch,
-      analysisMethod: formData.roofAnalysisMethod
-    });
-    
-    if (formData.roofPolygon) {
-      polygonDebugTool.debugPolygon(formData.roofPolygon, formData.roofSize || 0);
-    }
-  }, [mapDisabled, skipMap, formData.roofSize, formData.initialRoofSize,
-      formData.roofPolygon, hasPropertyData, propertyType, buildingSize, stories,
-      estimatedSizeFromProperty, localRoofSize, formData.roofShape, formData.roofPitch,
-      formData.roofAnalysisMethod]);
 
   // Memoize coordinates for map
   const coordinates = useMemo(() => {
@@ -300,6 +255,24 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     }
     return null;
   }, [formData.lat, formData.lng, hasValidCoordinates]);
+
+  // Get information about the sizing method to display to user
+  const getSizingMethodDescription = () => {
+    if (!formData.sizingMethod) return "AI-calculated estimate";
+    
+    switch (formData.sizingMethod) {
+      case 'property_calculation':
+        return "Based on property records";
+      case 'api_calculation':
+        return "AI-calculated from satellite imagery";
+      case 'polygon_measurement':
+        return "Measured from satellite imagery";
+      case 'default_fallback':
+        return "Estimated standard size";
+      default:
+        return "AI-calculated estimate";
+    }
+  };
 
   // Determine which map component to render
   const mapComponent = useMemo(() => {
@@ -323,7 +296,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
             {mapDisabled ? "Map view disabled" : "Map view skipped"}
           </p>
           <p className="text-xs text-gray-400 mt-1">
-            Using estimated roof size
+            Using property-based roof size estimate
           </p>
         </div>
       );
@@ -349,23 +322,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
     handleMapReady, handleMapError, handlePolygonCreated, killSwitch
   ]);
 
-  const getMethodDescription = () => {
-    if (!formData.roofAnalysisMethod) return "";
-    
-    switch (formData.roofAnalysisMethod) {
-      case "openai_vision":
-        return "AI analysis of satellite imagery";
-      case "property_data_calculation":
-        return "Calculated from property records";
-      case "property_data_fallback":
-        return "Calculated from property records (fallback)";
-      case "satellite_imagery":
-        return "Satellite imagery analysis";
-      default:
-        return formData.roofAnalysisMethod.replace(/_/g, ' ');
-    }
-  };
-
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-2">Your Roof Details</h2>
@@ -378,16 +334,6 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           {propertyType} {stories && `• ${stories} ${stories === 1 ? 'story' : 'stories'}`}
           {buildingSize && ` • ${formatNumber(buildingSize)} sq ft building`}
         </div>
-      )}
-      
-      {/* Debug button - only in development */}
-      {process.env.NODE_ENV === 'development' && (
-        <button 
-          onClick={debugEnvironment}
-          className="mb-2 text-xs text-gray-400 hover:text-gray-600"
-        >
-          Debug Environment
-        </button>
       )}
       
       {/* Map Container with Satellite View */}
@@ -414,7 +360,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
           <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 z-10 bg-white bg-opacity-70">
             <Camera size={40} className="mb-2" />
             <p className="text-sm">Error: {error}</p>
-            <p className="text-xs mt-1">Using estimated roof size</p>
+            <p className="text-xs mt-1">Using property-based roof size</p>
           </div>
         )}
       </div>
@@ -430,64 +376,41 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
         </div>
         
         <p className="text-sm text-gray-600 mb-3">
-          {hasPropertyData ? 
-            "Based on property records and satellite imagery." : 
-            (skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? 
-              "Using estimated roof size based on property data." : 
-              "Our AI analyzed your roof using satellite imagery.")}
-          {" You can also enter the size manually."}
+          {getSizingMethodDescription()}
+          {". You can also enter the size manually."}
         </p>
 
-        {/* Roof Characteristics if available */}
-        {(formData.roofShape || formData.roofPitch) && (
-          <div className="mt-2 mb-3 flex flex-wrap gap-2">
-            {formData.roofShape && (
-              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                {formData.roofShape === 'simple' ? 'Simple roof' : 'Complex roof'}
-              </span>
-            )}
-            {formData.roofPitch && (
-              <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-                {formData.roofPitch === 'flat' ? 'Flat roof' : 
-                formData.roofPitch === 'low' ? 'Low pitch' :
-                formData.roofPitch === 'moderate' ? 'Moderate pitch' :
-                formData.roofPitch === 'steep' ? 'Steep pitch' : 'Unknown pitch'}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Analysis Method if available */}
-        {formData.roofAnalysisMethod && (
-          <div className="mb-3 flex items-center">
-            <span className="text-xs text-gray-500 flex items-center">
-              Analysis method: {getMethodDescription()}
-              <button 
-                onClick={handleToggleInfoTooltip}
-                className="ml-1 text-gray-400 hover:text-gray-600"
-                aria-label="More information"
-              >
-                <Info size={14} />
-              </button>
-            </span>
-            
-            {showInfoTooltip && (
-              <div className="absolute bg-white p-3 rounded-lg shadow-lg text-xs text-gray-700 z-20 max-w-xs mt-1">
-                <p className="font-semibold mb-1">About This Analysis</p>
-                <p>
-                  {formData.roofAnalysisMethod === "openai_vision" ? 
-                    "Our AI analyzed satellite imagery of your roof to determine its size, shape, and pitch." :
-                    formData.roofAnalysisMethod === "property_data_calculation" ?
-                    "This estimate is calculated from property records, including the building size and number of stories." :
-                    "This estimate is based on multiple sources of data combined to give you the most accurate measurement."}
-                </p>
-                {formData.roofAnalysisNotes && (
-                  <p className="mt-1 italic">{formData.roofAnalysisNotes}</p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Analysis Method */}
+        <div className="mb-3 flex items-center">
+          <span className="text-xs text-gray-500 flex items-center">
+            Calculation method: {getSizingMethodDescription()}
+            <button 
+              onClick={handleToggleInfoTooltip}
+              className="ml-1 text-gray-400 hover:text-gray-600"
+              aria-label="More information"
+            >
+              <Info size={14} />
+            </button>
+          </span>
+          
+          {showInfoTooltip && (
+            <div className="absolute bg-white p-3 rounded-lg shadow-lg text-xs text-gray-700 z-20 max-w-xs mt-1">
+              <p className="font-semibold mb-1">About This Measurement</p>
+              <p>
+                {sizingMethod === "property_calculation" ? 
+                  "This estimate is calculated from property records using industry standard factors for your roof type and home size." :
+                  sizingMethod === "api_calculation" ?
+                  "This estimate was calculated using satellite imagery and AI analysis." :
+                  "This estimate is based on multiple sources of data combined to give you the most accurate measurement."}
+              </p>
+              <p className="mt-1">
+                For a {stories}-story {propertyType.toLowerCase()} of {formatNumber(buildingSize || 0)} sq ft, 
+                industry standards suggest a roof size between {formatNumber(Math.round((buildingSize || 2000)/stories * 1.2))} and 
+                {formatNumber(Math.round((buildingSize || 2000)/stories * 1.5))} sq ft.
+              </p>
+            </div>
+          )}
+        </div>
 
         {/* Auto/Manual Toggle */}
         <div className="mt-2">
@@ -498,7 +421,7 @@ const RoofSizeStep = ({ formData, updateFormData, nextStep, prevStep }) => {
               onChange={handleToggleAutoSize}
               className="mr-2 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
             />
-            Use {hasPropertyData ? "property-based" : (skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? "estimated" : "AI-calculated")} size (recommended)
+            Use {hasPropertyData ? "property-based" : (skipMap || error || mapDisabled || (killSwitch && killSwitch.googleMaps) ? "estimated" : "calculated")} size (recommended)
           </label>
         </div>
 
