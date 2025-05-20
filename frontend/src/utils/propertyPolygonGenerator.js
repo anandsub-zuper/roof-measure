@@ -1,4 +1,4 @@
-// src/utils/propertyPolygonGenerator.js - Updated with fixed positioning
+// src/utils/propertyPolygonGenerator.js - Updated with improved roof coverage
 /**
  * Property-specific polygon generation utility
  * Creates accurate roof polygons based on property metadata
@@ -16,7 +16,7 @@ export const generatePropertyPolygon = (lat, lng, size, propertyData = null) => 
   // Always validate inputs first
   if (!lat || !lng || !size) {
     console.warn("Invalid inputs for polygon generation");
-    return generateSimplePolygon(lat, lng, 2500, 0.85); // Using larger scale factor
+    return generateSimplePolygon(lat, lng, 2500, 1.0); // Using larger scale factor
   }
   
   // If we have property data, use it for better polygon generation
@@ -58,30 +58,30 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
   // Calculate basic size metrics
   const sqMeters = size * 0.092903;
   
-  // Define building-specific scaling factors
-  let scaleFactor = 0.85; // Increased from 0.4
+  // Define building-specific scaling factors - INCREASED to cover more of the roof
+  let scaleFactor = 1.0; // Increased from 0.85 to cover more of the roof
   let aspectRatio = 1.5; // Default
   
   // Adjust scaling based on building type
   if (typeInfo.isSingleFamily) {
-    // Single family homes
-    scaleFactor = 0.9; // Increased from 0.4
-    aspectRatio = 1.4;
+    // Single family homes - increase coverage
+    scaleFactor = 1.3; // Increased from 0.9 to expand polygon size
+    aspectRatio = 1.7; // Changed from 1.4 to better match typical roof shapes
   } else if (typeInfo.isTownhouse) {
     // Townhouses are narrower and longer
-    scaleFactor = 0.85; // Increased from 0.35
+    scaleFactor = 1.1; // Increased from 0.85
     aspectRatio = 2.2;
   } else if (typeInfo.isMultiFamily || typeInfo.isApartment) {
     // Multi-family buildings often have complex shapes
-    scaleFactor = 0.9; // Increased from 0.45
+    scaleFactor = 1.1; // Increased from 0.9
     aspectRatio = 1.6;
   } else if (typeInfo.isCommercial || typeInfo.isIndustrial) {
     // Commercial buildings tend to be larger and more square
-    scaleFactor = 0.85; // Increased from 0.35
+    scaleFactor = 1.0; // Increased from 0.85
     aspectRatio = 1.2;
   } else if (typeInfo.isWarehouse || typeInfo.isStorage) {
     // Warehouses are very rectangular
-    scaleFactor = 0.8; // Increased from 0.3
+    scaleFactor = 1.0; // Increased from 0.8
     aspectRatio = 2.5;
   }
   
@@ -90,7 +90,7 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
     // For multi-story, scale factor should be larger to account for the full footprint
     // A 2-story building should have a footprint ~50% of the total area
     const adjustedSize = size / stories;
-    scaleFactor *= 0.9 + (0.2 * stories); // Increase scale factor for multi-story buildings
+    scaleFactor *= 1.1 + (0.2 * stories); // Increase scale factor for multi-story buildings
     
     // Recalculate square meters with story adjustment
     const adjustedSqMeters = adjustedSize * 0.092903 * scaleFactor;
@@ -119,7 +119,7 @@ const generateTypedPolygon = (lat, lng, size, buildingType, stories, metadata) =
     ];
   }
   
-  // For single-story buildings, proceed with standard calculation
+  // For single-story buildings, proceed with standard calculation but with increased coverage
   const adjustedSqMeters = sqMeters * scaleFactor;
   
   // Calculate dimensions
@@ -224,29 +224,29 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
   // Size to square meters
   const sqMeters = size * 0.092903;
   
-  // Apply a larger scale factor for visual representation
-  let scaleFactor = 0.85; // Increased from 0.4
+  // Apply a larger scale factor for visual representation - INCREASED to cover more of the roof
+  let scaleFactor = 1.2; // Increased from 0.85 to expand polygon size
   
   // Adjust scaling based on size categories 
   if (size < 1200) {
-    scaleFactor = 0.9; // Increased from 0.45
+    scaleFactor = 1.3; // Increased from 0.9
   } else if (size >= 1200 && size < 3000) {
-    scaleFactor = 0.87; // Increased from 0.42
+    scaleFactor = 1.25; // Increased from 0.87
   } else if (size >= 3000 && size < 5000) {
-    scaleFactor = 0.85; // Increased from 0.4
+    scaleFactor = 1.2; // Increased from 0.85
   } else {
-    scaleFactor = 0.83; // Increased from 0.38
+    scaleFactor = 1.15; // Increased from 0.83
   }
   
   const adjustedSqMeters = sqMeters * scaleFactor;
   
   // Adapt aspect ratio based on building size
-  let aspectRatio = 1.5; // Default
+  let aspectRatio = 1.7; // Increased from 1.5 to better match typical roof shapes
   
   if (size < 1200) {
-    aspectRatio = 1.3; // Smaller buildings tend to be more square
+    aspectRatio = 1.5; // Increased from 1.3
   } else if (size >= 3000) {
-    aspectRatio = 1.7; // Larger buildings often more rectangular
+    aspectRatio = 1.9; // Increased from 1.7
   }
   
   // Calculate dimensions
@@ -281,15 +281,15 @@ export const generateSizeBasedPolygon = (lat, lng, size) => {
  * @param {number} scaleFactor - Scaling factor
  * @returns {Array} - Polygon coordinates
  */
-export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 0.85) => {
+export const generateSimplePolygon = (lat, lng, size = 2500, scaleFactor = 1.2) => {
   // Convert to square meters
   const sqMeters = size * 0.092903;
   
-  // Apply scale correction
+  // Apply scale correction - INCREASED to cover more of the roof
   const adjustedSqMeters = sqMeters * scaleFactor;
   
-  // Standard aspect ratio
-  const aspectRatio = 1.5;
+  // Standard aspect ratio - ADJUSTED to better match typical roof shapes
+  const aspectRatio = 1.7; // Increased from 1.5
   
   // Calculate dimensions
   const width = Math.sqrt(adjustedSqMeters / aspectRatio);
@@ -341,19 +341,19 @@ export const calculateRoofSizeFromBuildingSize = (buildingSize, propertyData) =>
   if (propertyType.includes('single') && propertyType.includes('family')) {
     // Single family home factors - adjust based on size and stories
     if (stories === 2) {
-      pitchFactor = 1.25; // Two-story homes often have steeper main roofs
-      overhangFactor = 1.08; // More substantial overhangs (8%)
+      pitchFactor = 1.3; // Increased from 1.25 - Two-story homes often have steeper main roofs
+      overhangFactor = 1.1; // Increased from 1.08 - More substantial overhangs (10%)
     } else {
-      pitchFactor = 1.2; // One-story homes have typical pitch
+      pitchFactor = 1.25; // Increased from 1.2 - One-story homes have typical pitch
     }
     
     // Adjust for building size (larger homes have more complex roofs)
     if (buildingSizeNum >= 2500) {
-      complexityFactor = 1.1; // 10% extra for large homes with complex roof lines
+      complexityFactor = 1.15; // Increased from 1.1 - 15% extra for large homes with complex roof lines
     } else if (buildingSizeNum >= 1800) {
-      complexityFactor = 1.07; // 7% extra for medium-large homes
+      complexityFactor = 1.12; // Increased from 1.07 - 12% extra for medium-large homes
     } else {
-      complexityFactor = 1.05; // 5% extra for smaller homes
+      complexityFactor = 1.1; // Increased from 1.05 - 10% extra for smaller homes
     }
   } else if (propertyType.includes('condo') || propertyType.includes('apartment')) {
     // Condos and apartments often have flatter roofs
